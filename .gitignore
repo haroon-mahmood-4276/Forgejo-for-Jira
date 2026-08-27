@@ -1,0 +1,14 @@
+/node_modules/
+/dist/
+/.vscode/
+.idea
+
+/.forge/
+
+/.container-service-assets/
+
+.DS_Store
+
+# Workflow files drafted here for other repositories, not part of this app.
+pest-browser-tests.yml
+ssh-inline.yml

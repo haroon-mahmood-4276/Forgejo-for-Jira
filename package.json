@@ -1,0 +1,20 @@
+{
+  "name": "forgejo-for-jira",
+  "version": "3.0.0",
+  "description": "Connects a self-hosted Forgejo instance to Jira Cloud's development information panel.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/local-test.mjs",
+    "lint": "forge lint"
+  },
+  "dependencies": {
+    "@forge/api": "^8.0.3",
+    "@forge/bridge": "^6.2.0",
+    "@forge/events": "^3.0.3",
+    "@forge/kvs": "^2.0.3",
+    "@forge/react": "^12.1.1",
+    "@forge/resolver": "^2.0.0"
+  }
+}

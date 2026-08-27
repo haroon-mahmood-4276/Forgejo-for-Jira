@@ -1,0 +1,166 @@
+modules:
+  # Registers the app as a development information provider. This is what
+  # authorises writes to /rest/devinfo/0.10/bulk; without it Jira rejects every
+  # submission with "Provider not installed ... for types '[DEVELOPMENT_INFO]'".
+  devops:developmentInfoProvider:
+    - key: forgejo-devinfo-provider
+      name:
+        value: Forgejo
+      homeUrl: https://forgejo.org
+      logoUrl: https://forgejo.org/favicon.svg
+      documentationUrl: https://forgejo.org/docs/latest/
+    #   # Adds the "Create branch" action to an issue's development panel.
+    #   #
+    #   # `urlTemplate` is a static manifest string and the only context Jira
+    #   # substitutes is {issue.key} and {issue.summary} - there is no placeholder
+    #   # for the connected Forgejo instance, whose host is only known per
+    #   # installation. A hosted app serving many instances therefore cannot send
+    #   # the admin straight to their own server, so this points at the Forgejo
+    #   # documentation for creating a branch, carrying the issue key so it can be
+    #   # copied. If you run this app against a single known instance, replace it
+    #   # with e.g. https://forgejo.example.com/owner/repo/branches
+    #   actions:
+    #     createBranch:
+    #       urlTemplate: https://forgejo.org/docs/latest/user/repository/protection/
+
+  # Authorises writes to /rest/builds/0.1/bulk. Build results arrive on the
+  # repository webhook as Forgejo's `workflow_run` event; the separate CI trigger
+  # also accepts them, for anyone using the generated workflow file.
+  devops:buildInfoProvider:
+    - key: forgejo-build-provider
+      name:
+        value: Forgejo Actions
+      homeUrl: https://forgejo.org
+      logoUrl: https://forgejo.org/favicon.svg
+      documentationUrl: https://forgejo.org/docs/latest/user/actions/
+
+  # Authorises writes to /rest/featureflags/0.1/bulk.
+  #
+  # Forgejo has no feature flag system of its own, so nothing is read out of it.
+  # Flags are reported by the customer's own tooling to the same CI trigger the
+  # build and deployment reports use.
+  devops:featureFlagInfoProvider:
+    - key: forgejo-feature-flag-provider
+      name:
+        value: Forgejo
+      homeUrl: https://forgejo.org
+      logoUrl: https://forgejo.org/favicon.svg
+      documentationUrl: https://forgejo.org/docs/latest/
+
+  # Authorises writes to /rest/deployments/0.1/bulk.
+  devops:deploymentInfoProvider:
+    - key: forgejo-deployment-provider
+      name:
+        value: Forgejo Actions
+      homeUrl: https://forgejo.org
+      logoUrl: https://forgejo.org/favicon.svg
+      documentationUrl: https://forgejo.org/docs/latest/user/actions/
+
+  # The site-level setup experience. Connecting a Forgejo instance decides which
+  # external server this Jira site trusts with development data, so it belongs to
+  # a Jira administrator rather than to any single project.
+  jira:adminPage:
+    - key: forgejo-admin
+      resource: admin-ui
+      # `native` selects UI Kit rendering; without it Forge treats the resource
+      # as Custom UI and expects a built index.html instead of a JSX entry point.
+      render: native
+      resolver:
+        function: adminResolver
+      title: Forgejo for Jira
+      layout: basic
+
+  # A read-only view for project admins: which instance and repositories feed
+  # their issues, and what a developer has to do for their work to show up.
+  jira:projectSettingsPage:
+    - key: forgejo-project-settings
+      resource: settings-ui
+      render: native
+      resolver:
+        function: projectResolver
+      title: Forgejo
+      layout: basic
+
+  webtrigger:
+    # Forgejo repository webhooks post here. The URL handed to the customer
+    # carries a `?c=<connectionId>` parameter that selects which stored signing
+    # secret the delivery is verified against.
+    - key: forgejo-webhook-receiver
+      function: handleForgejoWebhook
+    - key: forgejo-oauth-callback
+      function: handleOAuthCallback
+    # Forgejo Actions posts deployment and feature flag reports here - neither has
+    # anything in Forgejo to read, so they can only come from the customer's own
+    # workflow - signed with the same HMAC scheme and selecting the connection the
+    # same way. Builds are also accepted here, though they no longer need to be.
+    - key: forgejo-ci-status-receiver
+      function: handleCiStatus
+
+  # Historical import. A Forge invocation is far too short to read a whole
+  # repository, so the work is queued one page at a time and each event pushes
+  # the next one.
+  # The consumer names a function directly. It must NOT use the older
+  # `resolver: { function, method }` form: @forge/events v3 publishes with the
+  # `forge/app-event-2` schema, which rejects it at publish time with
+  # "Schema version 2 does not support resolver" - a 400 that neither
+  # `forge lint` nor `forge deploy` catches, because the manifest itself is
+  # still structurally valid.
+  consumer:
+    - key: forgejo-backfill-consumer
+      queue: forgejo-backfill
+      function: backfillWorker
+
+  function:
+    # Each function points at its own module rather than a shared barrel file.
+    # A barrel makes every handler share one bundle, so a top-level error in any
+    # one of them (for example a bad import in a resolver) would take down the
+    # webhook receiver too.
+    - key: handleForgejoWebhook
+      handler: webhook.handleForgejoWebhook
+    - key: handleOAuthCallback
+      handler: oauth-callback.handleOAuthCallback
+    - key: handleCiStatus
+      handler: ci-status.handleCiStatus
+    - key: backfillWorker
+      handler: backfill.handler
+    - key: adminResolver
+      handler: resolvers/admin.handler
+    - key: projectResolver
+      handler: resolvers/project.handler
+
+resources:
+  - key: admin-ui
+    path: src/frontend/admin/index.jsx
+  - key: settings-ui
+    path: src/frontend/settings/index.jsx
+
+permissions:
+  scopes:
+    - write:dev-info:jira
+    - delete:dev-info:jira
+    # Granular scopes only. The classic write:*:jira-software equivalents were
+    # also declared until a probe established they are not needed: with the
+    # classic three removed, writes to the builds, deployments and feature flag
+    # bulk APIs were all still accepted (202). They were, however, not
+    # sufficient on their own - a deployment written under the classic scope
+    # alone is refused with
+    # {"code":401,"message":"Unauthorized; scope does not match"}.
+    #
+    # Every scope here appears on the consent screen of every installation, so
+    # three that grant nothing are worth removing.
+    - write:build-info:jira
+    - write:deployment-info:jira
+    - write:feature-flag-info:jira
+    - read:jira-work
+    - storage:app
+  external:
+    fetch:
+      backend:
+        - address: "*"
+
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 512
+    architecture: arm64
+  id: ari:cloud:ecosystem::app/da83770a-16a6-4960-be89-5d6140a00494
