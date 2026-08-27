@@ -1,6 +1,6 @@
 {
   "name": "forgejo-for-jira",
-  "version": "3.0.0",
+  "version": "1.0.0",
   "description": "Connects a self-hosted Forgejo instance to Jira Cloud's development information panel.",
   "license": "MIT",
   "private": true,
