@@ -1,0 +1,40 @@
+# Fails the build on any known vulnerability in the dependency tree, so a
+# regression cannot reach a Marketplace submission unnoticed. Runs on every
+# push and pull request, and weekly, because an advisory can land against an
+# unchanged tree.
+name: Security
+
+on:
+  push:
+    branches: [v1]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+      - name: Tests
+        run: npm test
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+      - uses: github/codeql-action/analyze@v3

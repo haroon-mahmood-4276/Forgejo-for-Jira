@@ -1,0 +1,17 @@
+# Automated dependency vulnerability review, as required by the Atlassian
+# Marketplace security requirements for cloud apps. Dependabot raises a pull
+# request for every advisory affecting a dependency in the tree, including
+# transitive ones, and keeps the tree current between advisories.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    # Forge pins the runtime, so grouping keeps the @forge/* packages moving
+    # together rather than one pull request per package per week.
+    groups:
+      forge:
+        patterns:
+          - "@forge/*"

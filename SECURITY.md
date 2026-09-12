@@ -127,5 +127,19 @@ stored instance record, and only a Jira administrator can create one.
 
 ## Dependencies
 
-Runtime dependencies are Atlassian's own `@forge/*` packages plus Node's built-in `crypto`. There are
-no third-party runtime dependencies.
+Direct runtime dependencies are Atlassian's own `@forge/*` packages plus Node's built-in `crypto`. No
+third-party package is depended on directly; everything else in the tree arrives transitively through
+`@forge/*` (chiefly `@atlaskit/*` under `@forge/react`).
+
+That transitive surface is reviewed automatically, because it is where advisories actually land:
+
+- **`npm audit` runs in CI** on every push and pull request, and weekly on a schedule, at
+  `--audit-level=moderate`. The build fails on any known vulnerability, so a regression cannot reach
+  a Marketplace submission unnoticed. The weekly run exists because an advisory can be published
+  against a tree that has not changed.
+- **Dependabot** is enabled for npm and opens a pull request for every advisory affecting the tree,
+  transitive dependencies included, and keeps the tree current between advisories.
+- **CodeQL** runs static analysis over the JavaScript source on the same triggers.
+
+The tree is audited clean at the time of writing. Vulnerabilities are remediated under the timelines
+in Atlassian's Marketplace security bug fix policy.

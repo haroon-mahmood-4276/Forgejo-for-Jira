@@ -227,7 +227,7 @@ a stored instance a Jira administrator entered, and only Jira administrators can
 
 ```bash
 npm install
-npm test                       # 97 tests, no Forge/Jira/Forgejo needed
+npm test                       # 106 tests, no Forge/Jira/Forgejo needed
 forge lint
 forge deploy -e development
 forge install --site <your-site>.atlassian.net --product jira -e development
