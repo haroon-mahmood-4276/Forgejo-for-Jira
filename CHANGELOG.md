@@ -5,7 +5,7 @@ All notable changes to this project are recorded here. The format follows
 [Semantic Versioning](https://semver.org/). Git tags carry the app's version; Forge assigns its own
 version on every deploy, and the two are not expected to match.
 
-## [Unreleased]
+## [1.1.0] — 2026-09-13
 
 ### Security
 
@@ -66,5 +66,6 @@ First release.
   step.
 - Per-connection webhook signing secrets, PKCE OAuth, Jira-permission-guarded resolvers.
 
-[Unreleased]: https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/compare/v1.0.0...v1
+[Unreleased]: https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/compare/v1.1.0...v1
+[1.1.0]: https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/releases/tag/v1.0.0
