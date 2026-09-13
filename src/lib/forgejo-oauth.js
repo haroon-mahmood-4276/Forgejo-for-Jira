@@ -43,6 +43,16 @@ export function normaliseInstanceUrl(rawUrl) {
         throw new Error('Forgejo instance URL must use HTTPS.');
     }
 
+    // Credentials in the URL would be sent on every request and stored in plain
+    // storage alongside the URL; the OAuth application is the credential here.
+    if (parsed.username || parsed.password) {
+        throw new Error('Forgejo instance URL must not contain a username or password.');
+    }
+
+    if (parsed.search || parsed.hash) {
+        throw new Error('Forgejo instance URL must be a base URL with no query string or fragment.');
+    }
+
     return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
 }
 

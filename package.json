@@ -1,13 +1,27 @@
 {
   "name": "forgejo-for-jira",
-  "version": "1.0.0",
-  "description": "Connects a self-hosted Forgejo instance to Jira Cloud's development information panel.",
+  "version": "1.1.0",
+  "description": "Atlassian Forge app that connects a self-hosted Forgejo instance to the Jira Cloud development panel.",
   "license": "MIT",
   "private": true,
   "type": "module",
+  "author": "Haroon Mahmood <support@iamroon.pk>",
+  "homepage": "https://github.com/haroon-mahmood-4276/Forgejo-for-Jira#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haroon-mahmood-4276/Forgejo-for-Jira.git"
+  },
+  "bugs": {
+    "url": "https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/issues",
+    "email": "support@iamroon.pk"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node test/local-test.mjs",
-    "lint": "forge lint"
+    "lint": "forge lint",
+    "audit": "npm audit --audit-level=moderate"
   },
   "dependencies": {
     "@forge/api": "^8.0.5",

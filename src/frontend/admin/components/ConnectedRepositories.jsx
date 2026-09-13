@@ -82,10 +82,12 @@ export const ConnectedRepositories = ({ connection, reload, onError }) => {
                     // machine underneath the jobs already queued, and removing one
                     // leaves those jobs pointing at a record that no longer exists.
                     // Neither is recoverable from the page, so both are refused
-                    // until the import settles.
-                    const midImport = ["queued", "running"].includes(
-                        repo.backfillStatus,
-                    );
+                    // until the import settles. The backend applies the same rule
+                    // and additionally lets a stalled import through after an
+                    // hour, so an import that never finishes is not stuck forever.
+                    const midImport =
+                        ["queued", "running"].includes(repo.backfillStatus) &&
+                        !repo.backfillStale;
 
                     return {
                     key: repo.repoId,

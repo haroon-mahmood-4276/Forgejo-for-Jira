@@ -1,5 +1,12 @@
 import { exchangeCodeForToken, fetchAuthenticatedUser, toTokenRecord } from './lib/forgejo-oauth.js';
-import { consumePendingState, getConnection, saveConnection, saveToken } from './lib/storage.js';
+import { flattenQuery } from './lib/delivery.js';
+import {
+    consumePendingState,
+    getConnection,
+    getConnectionSecrets,
+    saveConnection,
+    saveToken
+} from './lib/storage.js';
 
 /**
  * Web trigger that Forgejo redirects the browser back to after the admin
@@ -9,11 +16,11 @@ import { consumePendingState, getConnection, saveConnection, saveToken } from '.
  * HTML: the person who clicked Connect needs to see whether it worked.
  */
 export async function handleOAuthCallback(request) {
-    const query = normaliseQuery(request.queryParameters);
+    const query = flattenQuery(request?.queryParameters);
 
     // Forgejo reports a denied or failed authorization via `error`.
     if (query.error) {
-        console.warn('Forgejo authorization was denied or failed:', query.error);
+        console.warn('Forgejo authorization was denied or failed:', String(query.error).slice(0, 200));
         return page(400, 'Authorization failed', [
             `Forgejo reported: ${escapeHtml(query.error_description || query.error)}`
         ]);
@@ -39,10 +46,17 @@ export async function handleOAuthCallback(request) {
         const connection = await getConnection(pending.connectionId);
         if (!connection) throw new Error('That connection was removed while you were authorizing.');
 
+        // The client secret is read from the connection's own secret record rather
+        // than copied into the pending state, so it exists in exactly one place.
+        const secrets = await getConnectionSecrets(pending.connectionId);
+        if (!secrets?.clientSecret) {
+            throw new Error('This connection has no stored client secret.');
+        }
+
         const token = await exchangeCodeForToken({
-            instanceUrl: pending.instanceUrl,
-            clientId: pending.clientId,
-            clientSecret: pending.clientSecret,
+            instanceUrl: connection.instanceUrl,
+            clientId: connection.clientId,
+            clientSecret: secrets.clientSecret,
             code: query.code,
             redirectUri: pending.redirectUri,
             codeVerifier: pending.codeVerifier
@@ -52,18 +66,21 @@ export async function handleOAuthCallback(request) {
         // A stored token that turns out to be unusable is worse than no token: the
         // admin walks away believing setup is finished.
         const user = await fetchAuthenticatedUser({
-            instanceUrl: pending.instanceUrl,
+            instanceUrl: connection.instanceUrl,
             accessToken: token.access_token
         });
 
-        const username = user.preferred_username || user.name || user.login || 'unknown user';
+        const username = String(
+            user?.preferred_username || user?.name || user?.login || 'unknown user'
+        );
 
         // Tokens are secrets: stored encrypted, never returned to any frontend.
         await saveToken(pending.connectionId, toTokenRecord(token, username));
 
         await saveConnection({ ...connection, connectedAt: Date.now(), username });
 
-        console.log(`Connection ${pending.connectionId} authorized as ${username}.`);
+        // The username is personal data and belongs in storage, not in logs.
+        console.log(`Connection ${pending.connectionId} authorized.`);
 
         return page(200, 'Connected to Forgejo', [
             `Signed in as <strong>${escapeHtml(username)}</strong>.`,
@@ -73,18 +90,6 @@ export async function handleOAuthCallback(request) {
         console.error('OAuth token exchange failed:', error.message);
         return page(500, 'Authorization failed', [escapeHtml(error.message)]);
     }
-}
-
-/**
- * Forge supplies query parameters as arrays, because a parameter can legally
- * repeat. Flatten to the first value of each, which is what OAuth expects.
- */
-function normaliseQuery(queryParameters = {}) {
-    const result = {};
-    for (const [key, value] of Object.entries(queryParameters)) {
-        result[key] = Array.isArray(value) ? value[0] : value;
-    }
-    return result;
 }
 
 /**
@@ -117,13 +122,20 @@ function page(statusCode, heading, paragraphs) {
             // This page never needs to be framed, and framing it would only serve a
             // clickjacking attempt.
             'X-Frame-Options': ['DENY'],
-            'Content-Security-Policy': ["default-src 'none'; style-src 'unsafe-inline'"]
+            'Content-Security-Policy': [
+                "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+            ],
+            'X-Content-Type-Options': ['nosniff'],
+            'Referrer-Policy': ['no-referrer'],
+            // The URL carries a single-use authorization code; nothing about this
+            // response should be cached or served again.
+            'Cache-Control': ['no-store']
         },
         body: `<!DOCTYPE html>
 <html lang="en">
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${heading}</title></head>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(heading)}</title></head>
   <body style="font-family: -apple-system, system-ui, sans-serif; padding: 2rem; max-width: 40rem; line-height: 1.5;">
-    <h1 style="font-size: 1.25rem;">${heading}</h1>
+    <h1 style="font-size: 1.25rem;">${escapeHtml(heading)}</h1>
     ${body}
   </body>
 </html>`

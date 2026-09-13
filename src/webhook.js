@@ -13,10 +13,11 @@ import {
 } from './lib/devinfo.js';
 import { startCommitRangeImport } from './backfill.js';
 import { mapWorkflowRun, reportsBuilds, submitBuilds, workflowFile } from './lib/builds.js';
+import { authenticateDelivery } from './lib/delivery.js';
 import { createClient } from './lib/forgejo-client.js';
 import { extractIssueKeys } from './lib/issue-keys.js';
-import { getConnection, getConnectionSecrets } from './lib/storage.js';
-import { getRawBody, readEventType, readSignature, verifySignature } from './lib/verify-signature.js';
+import { deleteRepository, getConnection, getRepository } from './lib/storage.js';
+import { readEventType } from './lib/verify-signature.js';
 
 /**
  * Web trigger that receives Forgejo repository webhook deliveries.
@@ -37,35 +38,10 @@ import { getRawBody, readEventType, readSignature, verifySignature } from './lib
  * reconstruction of Forgejo's original pretty-printed rendering.
  */
 export async function handleForgejoWebhook(request) {
-    const connectionId = firstQueryValue(request.queryParameters, 'c');
+    const delivery = await authenticateDelivery(request, 'webhook');
+    if (!delivery.ok) return delivery.response;
 
-    // Fail closed. Without a connection we cannot know which secret to verify
-    // against, so there is no safe way to fall through to processing the payload.
-    if (!connectionId) {
-        console.warn('Rejected webhook delivery with no connection identifier.');
-        return { statusCode: 400, body: 'Missing connection identifier' };
-    }
-
-    const secrets = await getConnectionSecrets(connectionId);
-    if (!secrets?.webhookSecret) {
-        console.warn(`Rejected webhook delivery for unknown connection ${connectionId}.`);
-        return { statusCode: 404, body: 'Unknown connection' };
-    }
-
-    const rawBody = getRawBody(request);
-
-    if (!verifySignature(rawBody, readSignature(request.headers), secrets.webhookSecret)) {
-        console.warn(`Rejected webhook delivery for ${connectionId} with an invalid signature.`);
-        return { statusCode: 401, body: 'Invalid signature' };
-    }
-
-    let payload;
-    try {
-        payload = JSON.parse(rawBody);
-    } catch (error) {
-        console.error('Webhook body was not valid JSON:', error.message);
-        return { statusCode: 400, body: 'Malformed JSON body' };
-    }
+    const { connectionId, payload } = delivery;
 
     // Forgejo sends the event name in a header; some older deliveries omit it, so
     // fall back to sniffing the payload for a push.
@@ -96,6 +72,26 @@ async function routeEvent(connectionId, eventType, payload) {
           ? 'workflow_run'
           : eventType;
 
+    if (!SUPPORTED_EVENTS.has(normalisedEvent)) {
+        console.log(`Ignoring unsupported Forgejo event type: ${eventType}`);
+        return { statusCode: 200, body: `Ignored event: ${eventType}` };
+    }
+
+    // The signing secret is shared by every repository on a connection, so a valid
+    // signature proves the delivery came from the instance - not that it came from
+    // a repository the administrator chose to connect. Only development data for
+    // repositories that were explicitly connected is accepted.
+    const repositoryId = deliveredRepositoryId(payload);
+    const repo = await getRepository(connectionId, repositoryId);
+
+    if (!repo) {
+        console.warn(
+            `Rejected ${eventType} delivery for ${connectionId}: ` +
+            `repository ${repositoryId ?? '(none)'} is not connected.`
+        );
+        return { statusCode: 404, body: 'Repository is not connected' };
+    }
+
     switch (normalisedEvent) {
         case 'push':
             await queueTruncatedCommits(connectionId, payload);
@@ -125,9 +121,31 @@ async function routeEvent(connectionId, eventType, payload) {
             return handleWorkflowRun(connectionId, payload);
 
         default:
-            console.log(`Ignoring unsupported Forgejo event type: ${eventType}`);
-            return { statusCode: 200, body: `Ignored event: ${eventType}` };
+            // Unreachable: SUPPORTED_EVENTS is checked above. Kept so a future
+            // addition to the set without a case here fails loudly.
+            throw new Error(`No handler for supported event ${normalisedEvent}`);
     }
+}
+
+const SUPPORTED_EVENTS = new Set([
+    'push',
+    'create',
+    'pull_request',
+    'delete',
+    'repository',
+    'workflow_run'
+]);
+
+/**
+ * The Forgejo repository id a delivery is about, as a string to match storage.
+ *
+ * Every handled event carries `repository` at the top level. Actions run events
+ * also nest it under `run`, which is consulted as a fallback because the
+ * top-level copy has not always been present on that event.
+ */
+function deliveredRepositoryId(payload) {
+    const id = payload.repository?.id ?? payload.run?.repository?.id;
+    return id === undefined || id === null ? undefined : String(id);
 }
 
 /**
@@ -418,29 +436,19 @@ async function handleDelete(connectionId, payload) {
 /**
  * Handle a `repository` event. Only deletion matters: when the repository is
  * gone, its development data should go with it rather than lingering as links
- * that 404.
+ * that 404, and the stored record should go too - there is nothing left to
+ * re-import or to remove a webhook from.
  */
 async function handleRepositoryEvent(connectionId, payload) {
     if (payload.action !== 'deleted') {
         return { statusCode: 200, body: `Ignored repository action: ${payload.action}` };
     }
 
-    const repositoryId = devinfoRepositoryId(connectionId, payload.repository?.id);
+    const repoId = String(payload.repository?.id);
+    const repositoryId = devinfoRepositoryId(connectionId, repoId);
     const status = await deleteRepositoryEntity(repositoryId);
+    await deleteRepository(connectionId, repoId);
 
     console.log(`Deleted repository ${repositoryId} from Jira devinfo (status ${status}).`);
     return { statusCode: 200, body: 'Repository removed' };
-}
-
-// ---------------------------------------------------------------------------
-// Request helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Forge supplies query parameters as arrays, because a parameter can legally
- * repeat. Only the first value is meaningful here.
- */
-function firstQueryValue(queryParameters = {}, name) {
-    const value = queryParameters?.[name];
-    return Array.isArray(value) ? value[0] : value;
 }

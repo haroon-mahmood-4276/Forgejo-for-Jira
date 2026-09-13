@@ -2,9 +2,8 @@ import api, { route } from '@forge/api';
 // Jira's build state enum is shared with the `workflow_run` webhook path, so the
 // two routes into the builds API cannot disagree about what Jira accepts.
 import { BUILD_STATES, DEPLOYMENT_STATES } from './lib/builds.js';
-import { getConnectionSecrets } from './lib/storage.js';
-import { extractIssueKeys } from './lib/issue-keys.js';
-import { getRawBody, readSignature, verifySignature } from './lib/verify-signature.js';
+import { authenticateDelivery } from './lib/delivery.js';
+import { extractIssueKeys, isIssueKey } from './lib/issue-keys.js';
 
 /**
  * Receives build, deployment and feature flag reports from Forgejo Actions.
@@ -20,6 +19,11 @@ import { getRawBody, readSignature, verifySignature } from './lib/verify-signatu
  * signed with the same HMAC scheme the repository webhook uses and selecting the
  * connection with the same `?c=` parameter. The payload shape is defined by this
  * app; the admin page generates a ready-to-paste workflow that produces it.
+ *
+ * Validation happens here rather than being left to Jira. Jira answers a bad
+ * document with a 400 naming a schema path, which the app relays as a 502 - true
+ * but unhelpful to the person editing a workflow file. A missing field they can
+ * fix is reported as a 400 that names the field.
  */
 
 /** Jira's deployment environment type enum. */
@@ -46,33 +50,10 @@ const FLAG_ENVIRONMENT_TYPES = new Set([
 ]);
 
 export async function handleCiStatus(request) {
-    const connectionId = firstQueryValue(request.queryParameters, 'c');
+    const delivery = await authenticateDelivery(request, 'CI status');
+    if (!delivery.ok) return delivery.response;
 
-    if (!connectionId) {
-        console.warn('Rejected CI status delivery with no connection identifier.');
-        return { statusCode: 400, body: 'Missing connection identifier' };
-    }
-
-    const secrets = await getConnectionSecrets(connectionId);
-    if (!secrets?.webhookSecret) {
-        console.warn(`Rejected CI status delivery for unknown connection ${connectionId}.`);
-        return { statusCode: 404, body: 'Unknown connection' };
-    }
-
-    const rawBody = getRawBody(request);
-
-    if (!verifySignature(rawBody, readSignature(request.headers), secrets.webhookSecret)) {
-        console.warn(`Rejected CI status delivery for ${connectionId} with an invalid signature.`);
-        return { statusCode: 401, body: 'Invalid signature' };
-    }
-
-    let payload;
-    try {
-        payload = JSON.parse(rawBody);
-    } catch (error) {
-        console.error('CI status body was not valid JSON:', error.message);
-        return { statusCode: 400, body: 'Malformed JSON body' };
-    }
+    const { payload } = delivery;
 
     const issueKeys = resolveIssueKeys(payload);
     if (issueKeys.length === 0) {
@@ -96,13 +77,20 @@ export async function handleCiStatus(request) {
  * themselves. So `ref` and `commitMessage` are also scanned, which is what the
  * generated workflow relies on - it simply passes through the branch name and
  * the commit subject.
+ *
+ * Explicit keys are still checked against the issue-key shape. A caller cannot
+ * fail the whole batch with one malformed entry, and nothing that is not an
+ * issue key is ever forwarded to Jira as one.
  */
 function resolveIssueKeys(payload) {
     const explicit = Array.isArray(payload.issueKeys)
-        ? payload.issueKeys.filter((key) => typeof key === 'string' && key.trim())
+        ? payload.issueKeys
+            .filter((key) => typeof key === 'string')
+            .map((key) => key.trim())
+            .filter(isIssueKey)
         : [];
 
-    if (explicit.length > 0) return [...new Set(explicit.map((key) => key.trim()))];
+    if (explicit.length > 0) return [...new Set(explicit)];
 
     return extractIssueKeys(payload.ref, payload.commitMessage, payload.displayName);
 }
@@ -111,19 +99,25 @@ function resolveIssueKeys(payload) {
  * Submit a build result to Jira's builds API.
  */
 async function submitBuild(payload, issueKeys) {
+    const url = requireUrl(payload);
+    if (!url) return badRequest('build', '"url" is required and must be an absolute URL');
+
     const body = {
         builds: [
             {
                 schemaVersion: '1.0',
-                pipelineId: String(payload.pipelineId ?? 'forgejo-actions'),
+                pipelineId: optionalString(payload.pipelineId, 'forgejo-actions'),
                 // Jira orders builds within a pipeline by `buildNumber`, so it has to be
                 // a number rather than a string.
-                buildNumber: Number(payload.buildNumber ?? 0),
+                buildNumber: toNumber(payload.buildNumber, 0),
                 updateSequenceNumber: Date.now(),
-                displayName: payload.displayName ?? `Build ${payload.buildNumber ?? ''}`.trim(),
-                url: payload.url,
+                displayName: optionalString(
+                    payload.displayName,
+                    `Build ${payload.buildNumber ?? ''}`.trim()
+                ),
+                url,
                 state: normaliseState(payload.state, BUILD_STATES),
-                lastUpdated: payload.lastUpdated ?? new Date().toISOString(),
+                lastUpdated: optionalString(payload.lastUpdated, new Date().toISOString()),
                 issueKeys
             }
         ],
@@ -137,10 +131,12 @@ async function submitBuild(payload, issueKeys) {
  * Submit a deployment result to Jira's deployments API.
  */
 async function submitDeployment(payload, issueKeys) {
-    const environmentId = String(payload.environment ?? 'unmapped');
+    const url = requireUrl(payload);
+    if (!url) return badRequest('deployment', '"url" is required and must be an absolute URL');
 
+    const environmentId = optionalString(payload.environment, 'unmapped');
     const environmentType = normaliseEnvironmentType(environmentId);
-
+    const pipelineId = optionalString(payload.pipelineId, 'forgejo-actions');
     const sequence = Date.now();
 
     const body = {
@@ -148,21 +144,24 @@ async function submitDeployment(payload, issueKeys) {
             {
                 schemaVersion: '1.0',
                 // Orders deployments to the same environment.
-                deploymentSequenceNumber: Number(payload.deploymentSequenceNumber ?? sequence),
+                deploymentSequenceNumber: toNumber(payload.deploymentSequenceNumber, sequence),
                 updateSequenceNumber: sequence,
-                displayName: payload.displayName ?? `Deployment to ${environmentId}`,
-                url: payload.url,
-                description: payload.description ?? payload.displayName ?? 'Forgejo Actions deployment',
-                lastUpdated: payload.lastUpdated ?? new Date().toISOString(),
+                displayName: optionalString(payload.displayName, `Deployment to ${environmentId}`),
+                url,
+                description: optionalString(
+                    payload.description,
+                    optionalString(payload.displayName, 'Forgejo Actions deployment')
+                ),
+                lastUpdated: optionalString(payload.lastUpdated, new Date().toISOString()),
                 state: normaliseState(payload.state, DEPLOYMENT_STATES),
                 pipeline: {
-                    id: String(payload.pipelineId ?? 'forgejo-actions'),
-                    displayName: payload.pipelineId ?? 'Forgejo Actions',
-                    url: payload.url
+                    id: pipelineId,
+                    displayName: pipelineId === 'forgejo-actions' ? 'Forgejo Actions' : pipelineId,
+                    url
                 },
                 environment: {
                     id: environmentId,
-                    displayName: payload.environmentName ?? environmentId,
+                    displayName: optionalString(payload.environmentName, environmentId),
                     type: environmentType
                 },
                 issueKeys
@@ -184,22 +183,26 @@ async function submitDeployment(payload, issueKeys) {
  * trigger's shape and signing rather than being a second, near-identical one.
  */
 async function submitFeatureFlag(payload, issueKeys) {
-    const key = String(payload.key ?? payload.id ?? '').trim();
+    const key = optionalString(payload.key, optionalString(payload.id, ''));
 
     if (!key) {
         console.warn('Feature flag report carried no key - nothing to identify it by.');
-        return { statusCode: 400, body: 'Feature flag key is required' };
+        return badRequest('feature flag', '"key" is required');
     }
 
-    const lastUpdated = payload.lastUpdated ?? new Date().toISOString();
+    const url = requireUrl(payload);
+    const lastUpdated = optionalString(payload.lastUpdated, new Date().toISOString());
 
     // Jira requires an explicit rollout only when a percentage is given; sending
     // `percentage: undefined` would fail validation, so it is built conditionally.
+    const percentage = Number(payload.rolloutPercentage);
     const status = {
         enabled: Boolean(payload.enabled),
         defaultValue: String(payload.defaultValue ?? (payload.enabled ? 'true' : 'false')),
-        ...(Number.isFinite(Number(payload.rolloutPercentage))
-            ? { rollout: { percentage: Number(payload.rolloutPercentage) } }
+        ...(payload.rolloutPercentage !== undefined &&
+        payload.rolloutPercentage !== null &&
+        Number.isFinite(percentage)
+            ? { rollout: { percentage } }
             : {})
     };
 
@@ -210,22 +213,25 @@ async function submitFeatureFlag(payload, issueKeys) {
                 // `id` is what Jira de-duplicates on; the key is the human-facing
                 // name and the two are the same thing unless the caller separates
                 // them.
-                id: String(payload.id ?? key),
+                id: optionalString(payload.id, key),
                 key,
                 updateSequenceId: Date.now(),
-                displayName: payload.displayName ?? key,
+                displayName: optionalString(payload.displayName, key),
                 issueKeys,
                 summary: {
-                    url: payload.url,
+                    ...(url ? { url } : {}),
                     status,
                     lastUpdated
                 },
                 details: [
                     {
-                        url: payload.url,
+                        ...(url ? { url } : {}),
                         lastUpdated,
                         environment: {
-                            name: payload.environmentName ?? payload.environment ?? 'production',
+                            name: optionalString(
+                                payload.environmentName,
+                                optionalString(payload.environment, 'production')
+                            ),
                             type: normaliseFlagEnvironmentType(payload.environment)
                         },
                         status
@@ -238,6 +244,10 @@ async function submitFeatureFlag(payload, issueKeys) {
 
     return submit(route`/rest/featureflags/0.1/bulk`, body, 'feature flag');
 }
+
+// ---------------------------------------------------------------------------
+// Field normalisation
+// ---------------------------------------------------------------------------
 
 /**
  * Jira rejects a batch whose environment type it does not recognise, so anything
@@ -268,6 +278,49 @@ function normaliseState(state, allowed) {
     return allowed.has(normalised) ? normalised : 'unknown';
 }
 
+/** A non-empty string from the payload, or the fallback. */
+function optionalString(value, fallback) {
+    if (value === undefined || value === null) return fallback;
+    const text = String(value).trim();
+    return text || fallback;
+}
+
+/**
+ * A finite number from the payload, or the fallback. `Number('abc')` is NaN,
+ * which JSON serialises as `null` and Jira rejects with a schema error naming a
+ * field the workflow author never set on purpose.
+ */
+function toNumber(value, fallback) {
+    if (value === undefined || value === null || value === '') return fallback;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
+
+/**
+ * The `url` field, if it is an absolute http(s) URL. Jira requires one on builds
+ * and deployments and rejects anything relative or schemeless.
+ */
+function requireUrl(payload) {
+    const text = optionalString(payload.url, '');
+    if (!text) return undefined;
+
+    try {
+        const parsed = new URL(text);
+        return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? text : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function badRequest(label, reason) {
+    console.warn(`Rejected ${label} report: ${reason}.`);
+    return { statusCode: 400, body: `Invalid ${label} report: ${reason}` };
+}
+
+// ---------------------------------------------------------------------------
+// Submission
+// ---------------------------------------------------------------------------
+
 async function submit(path, body, label) {
     const response = await api.asApp().requestJira(path, {
         method: 'POST',
@@ -294,9 +347,4 @@ async function submit(path, body, label) {
         statusCode: 502,
         body: `Jira rejected the ${label} (${response.status}): ${responseBody}`
     };
-}
-
-function firstQueryValue(queryParameters = {}, name) {
-    const value = queryParameters?.[name];
-    return Array.isArray(value) ? value[0] : value;
 }

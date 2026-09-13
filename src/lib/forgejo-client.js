@@ -61,8 +61,22 @@ export async function createClient(connectionId) {
     /**
      * Swap an expiring token for a fresh one and persist it, so sibling
      * invocations pick up the new token instead of each refreshing separately.
+     *
+     * Forgejo rotates refresh tokens: each one can be redeemed once, and the
+     * grant that redeems it is handed a new one. Two invocations refreshing at
+     * the same moment - a backfill page and a webhook, say - would race, and the
+     * loser's stale refresh token would be refused, breaking the connection
+     * until an admin re-authorized. So before spending a refresh token the
+     * stored record is re-read: if another invocation has already refreshed,
+     * its token is adopted instead.
      */
     const refresh = async () => {
+        const stored = await getToken(connectionId);
+        if (stored?.accessToken && stored.accessToken !== token.accessToken) {
+            token = stored;
+            return token;
+        }
+
         const response = await refreshAccessToken({
             instanceUrl: connection.instanceUrl,
             clientId: connection.clientId,
@@ -146,6 +160,8 @@ export async function createClient(connectionId) {
         return { items: list, hasMore, total: Number.isFinite(total) ? total : undefined };
     };
 
+    const hooksPath = (owner, name) => `/repos/${enc(owner)}/${enc(name)}/hooks`;
+
     return {
         connection,
 
@@ -186,7 +202,28 @@ export async function createClient(connectionId) {
         compareCommits: (owner, name, base, head) =>
             requestJson(`/repos/${enc(owner)}/${enc(name)}/compare/${enc(base)}...${enc(head)}`),
 
-        listWebhooks: (owner, name) => requestJson(`/repos/${enc(owner)}/${enc(name)}/hooks`),
+        /**
+         * The webhook this app already registered on a repository, if any.
+         *
+         * Matched on the delivery URL, which carries the connection id and so
+         * identifies this installation and this connection exactly. Used to avoid
+         * registering a second, identical hook when a repository is reconnected -
+         * two hooks mean every push is delivered twice.
+         *
+         * Best effort: an instance that refuses to list hooks costs a possible
+         * duplicate, not the connect.
+         */
+        async findWebhook(owner, name, url) {
+            try {
+                const hooks = await requestJson(hooksPath(owner, name));
+                return (Array.isArray(hooks) ? hooks : []).find(
+                    (hook) => hook?.config?.url === url
+                );
+            } catch (error) {
+                console.warn(`Could not list webhooks on ${owner}/${name}: ${error.message}`);
+                return undefined;
+            }
+        },
 
         /**
          * Create the repository webhook pointing back at this installation.
@@ -204,7 +241,7 @@ export async function createClient(connectionId) {
                 config: { url, content_type: 'json', http_method: 'post', secret }
             });
 
-            const response = await request(`/repos/${enc(owner)}/${enc(name)}/hooks`, {
+            const response = await request(hooksPath(owner, name), {
                 method: 'POST',
                 body: JSON.stringify(payload('forgejo'))
             });
@@ -213,7 +250,7 @@ export async function createClient(connectionId) {
 
             const firstError = await response.text();
 
-            const fallback = await request(`/repos/${enc(owner)}/${enc(name)}/hooks`, {
+            const fallback = await request(hooksPath(owner, name), {
                 method: 'POST',
                 body: JSON.stringify(payload('gitea'))
             });
@@ -226,7 +263,7 @@ export async function createClient(connectionId) {
         },
 
         async deleteWebhook(owner, name, hookId) {
-            const response = await request(`/repos/${enc(owner)}/${enc(name)}/hooks/${hookId}`, {
+            const response = await request(`${hooksPath(owner, name)}/${enc(hookId)}`, {
                 method: 'DELETE'
             });
 

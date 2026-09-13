@@ -1,7 +1,7 @@
 import * as resolverModule from '@forge/resolver';
 import { requireProjectAdmin } from '../lib/permissions.js';
 import { resolverClass } from '../lib/resolver-class.js';
-import { getProjectLink, listConnections, listRepositories, saveProjectLink } from '../lib/storage.js';
+import { listConnections, listRepositories } from '../lib/storage.js';
 
 /**
  * Backend for the project settings page.
@@ -12,8 +12,7 @@ import { getProjectLink, listConnections, listRepositories, saveProjectLink } fr
  * site-level decision made on the admin page.
  *
  * What a project admin can do here is see which instance and repositories feed
- * their project's issues, and record which connection they consider theirs so
- * the page shows the relevant one first.
+ * their project's issues, and what their team has to do for work to show up.
  */
 const Resolver = resolverClass(resolverModule);
 const resolver = new Resolver();
@@ -48,22 +47,6 @@ resolver.define('getProjectView', async ({ context }) => {
     // reader having to know it already.
     exampleBranch: `${projectKey}-123-short-description`
   };
-});
-
-/**
- * Record which connection this project considers its own.
- *
- * Guarded even though it changes nothing outside the project: a resolver is
- * reachable by any authenticated user of the site, not only by whoever Jira
- * chose to render the page for.
- */
-resolver.define('setProjectConnection', async ({ payload, context }) => {
-  const projectKey = context?.extension?.project?.key;
-  await requireProjectAdmin(projectKey);
-
-  await saveProjectLink(projectKey, payload.connectionId);
-
-  return { success: true };
 });
 
 export const handler = resolver.getDefinitions();

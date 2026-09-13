@@ -1,6 +1,7 @@
 import * as resolverModule from '@forge/resolver';
 import { webTrigger } from '@forge/api';
-import { startBackfill } from '../backfill.js';
+import { isImportStale, startBackfill } from '../backfill.js';
+import { isConnectionId } from '../lib/delivery.js';
 import { deleteRepositoryEntity, devinfoRepositoryId } from '../lib/devinfo.js';
 import { createClient } from '../lib/forgejo-client.js';
 import {
@@ -41,6 +42,40 @@ const Resolver = resolverClass(resolverModule);
 const resolver = new Resolver();
 
 // ---------------------------------------------------------------------------
+// Input handling
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the connection a payload names, or throw.
+ *
+ * Every resolver below acts on one connection, and every one of them has to
+ * refuse the same two things: an identifier that is not shaped like one, and
+ * one that names nothing. Checking the shape first keeps arbitrary strings out
+ * of storage keys.
+ */
+async function requireConnection(payload) {
+  const connectionId = String(payload?.connectionId ?? '');
+  if (!isConnectionId(connectionId)) throw new Error('Invalid connection identifier.');
+
+  const connection = await getConnection(connectionId);
+  if (!connection) throw new Error('That connection no longer exists.');
+
+  return connection;
+}
+
+/** Forgejo repository ids are positive integers; anything else names no repository. */
+function requireRepoId(value) {
+  const repoId = String(value ?? '').trim();
+  if (!/^[0-9]{1,18}$/.test(repoId)) throw new Error('Invalid repository identifier.');
+  return repoId;
+}
+
+/** Trim a free-text field and cap its length, so a stored record stays small. */
+function text(value, max = 200) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+// ---------------------------------------------------------------------------
 // Trigger URLs
 // ---------------------------------------------------------------------------
 
@@ -50,16 +85,14 @@ const resolver = new Resolver();
  * which connection's signing secret to verify a delivery against.
  */
 async function triggerUrls(connectionId) {
-  const [webhookBase, ciBase, redirectUri] = await Promise.all([
+  const [webhookBase, ciBase] = await Promise.all([
     webTrigger.getUrl('forgejo-webhook-receiver'),
-    webTrigger.getUrl('forgejo-ci-status-receiver'),
-    webTrigger.getUrl('forgejo-oauth-callback')
+    webTrigger.getUrl('forgejo-ci-status-receiver')
   ]);
 
   return {
     webhookUrl: `${webhookBase}?c=${connectionId}`,
-    ciStatusUrl: `${ciBase}?c=${connectionId}`,
-    redirectUri
+    ciStatusUrl: `${ciBase}?c=${connectionId}`
   };
 }
 
@@ -82,9 +115,8 @@ resolver.define('getOverview', async () => {
 
   const detailed = await Promise.all(
     connections.map(async (connection) => {
-      const [token, urls, repositories] = await Promise.all([
+      const [token, repositories] = await Promise.all([
         getToken(connection.id),
-        triggerUrls(connection.id),
         listRepositories(connection.id)
       ]);
 
@@ -93,9 +125,6 @@ resolver.define('getOverview', async () => {
         // Never send the client secret or the token back to the browser; the
         // page only needs to know whether they exist.
         connected: Boolean(token?.accessToken),
-        tokenExpiresAt: token?.expiresAt,
-        webhookUrl: urls.webhookUrl,
-        ciStatusUrl: urls.ciStatusUrl,
         repositories: repositories.map(summariseRepository)
       };
     })
@@ -117,10 +146,12 @@ function summariseRepository(repo) {
     fullName: repo.fullName,
     htmlUrl: repo.htmlUrl,
     addedAt: repo.addedAt,
-    hookInstalled: Boolean(repo.hookId),
     backfillStatus: backfill.status ?? 'not started',
     backfillPhase: backfill.phase,
     backfillError: backfill.error,
+    // An import that has made no progress for an hour may be restarted; the page
+    // re-enables its buttons on this rather than reimplementing the rule.
+    backfillStale: isImportStale(backfill),
     counts: backfill.counts ?? { commits: 0, branches: 0, pullRequests: 0 }
   };
 }
@@ -137,8 +168,9 @@ function summariseRepository(repo) {
 resolver.define('revealWebhookSecret', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const secrets = await getConnectionSecrets(payload.connectionId);
-  if (!secrets?.webhookSecret) throw new Error('That connection no longer exists.');
+  const connection = await requireConnection(payload);
+  const secrets = await getConnectionSecrets(connection.id);
+  if (!secrets?.webhookSecret) throw new Error('That connection has no signing secret.');
 
   return { webhookSecret: secrets.webhookSecret };
 });
@@ -161,8 +193,8 @@ resolver.define('createConnection', async ({ payload }) => {
   await requireJiraAdmin();
 
   const instanceUrl = normaliseInstanceUrl(payload.instanceUrl);
-  const clientId = String(payload.clientId ?? '').trim();
-  const clientSecret = String(payload.clientSecret ?? '').trim();
+  const clientId = text(payload.clientId, 500);
+  const clientSecret = text(payload.clientSecret, 2000);
 
   if (!clientId) throw new Error('Client ID is required.');
   if (!clientSecret) throw new Error('Client secret is required.');
@@ -180,7 +212,7 @@ resolver.define('createConnection', async ({ payload }) => {
 
   const connection = {
     id,
-    name: String(payload.name ?? '').trim() || new URL(instanceUrl).hostname,
+    name: text(payload.name, 100) || new URL(instanceUrl).hostname,
     instanceUrl,
     clientId,
     createdAt: Date.now()
@@ -188,42 +220,7 @@ resolver.define('createConnection', async ({ payload }) => {
 
   await saveConnection(connection);
 
-  return { ...connection, ...(await triggerUrls(id)) };
-});
-
-/**
- * Update a connection's display name, client ID or client secret.
- *
- * The instance URL is deliberately not editable: repositories, webhooks and
- * already-submitted development data all belong to the instance it was created
- * against. Pointing an existing connection somewhere else would silently
- * mis-attribute all of it. Delete and recreate instead.
- */
-resolver.define('updateConnection', async ({ payload }) => {
-  await requireJiraAdmin();
-
-  const connection = await getConnection(payload.connectionId);
-  if (!connection) throw new Error('That connection no longer exists.');
-
-  const secrets = (await getConnectionSecrets(connection.id)) ?? {};
-  const clientSecret = String(payload.clientSecret ?? '').trim();
-
-  await saveConnectionSecrets(connection.id, {
-    ...secrets,
-    // Blank means "keep the saved one", so an admin can change the name without
-    // having to re-enter a secret they cannot read back.
-    clientSecret: clientSecret || secrets.clientSecret
-  });
-
-  const updated = {
-    ...connection,
-    name: String(payload.name ?? '').trim() || connection.name,
-    clientId: String(payload.clientId ?? '').trim() || connection.clientId
-  };
-
-  await saveConnection(updated);
-
-  return updated;
+  return connection;
 });
 
 /**
@@ -242,8 +239,7 @@ resolver.define('updateConnection', async ({ payload }) => {
 resolver.define('setBuildIgnoredWorkflows', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const connection = await getConnection(payload.connectionId);
-  if (!connection) throw new Error('That connection no longer exists.');
+  const connection = await requireConnection(payload);
 
   // Accepts either a list or the comma-separated string the admin page collects.
   const raw = Array.isArray(payload.workflows)
@@ -251,8 +247,8 @@ resolver.define('setBuildIgnoredWorkflows', async ({ payload }) => {
     : String(payload.workflows ?? '').split(',');
 
   const buildIgnoredWorkflows = [
-    ...new Set(raw.map((entry) => String(entry).trim()).filter(Boolean))
-  ];
+    ...new Set(raw.map((entry) => text(entry, 200)).filter(Boolean))
+  ].slice(0, 100);
 
   const updated = { ...connection, buildIgnoredWorkflows };
   await saveConnection(updated);
@@ -270,7 +266,7 @@ resolver.define('setBuildIgnoredWorkflows', async ({ payload }) => {
 resolver.define('deleteConnection', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const { connectionId } = payload;
+  const { id: connectionId } = await requireConnection(payload);
   const repositories = await listRepositories(connectionId);
 
   let client;
@@ -305,8 +301,7 @@ resolver.define('deleteConnection', async ({ payload }) => {
 resolver.define('startOAuth', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const connection = await getConnection(payload.connectionId);
-  if (!connection) throw new Error('That connection no longer exists.');
+  const connection = await requireConnection(payload);
 
   const secrets = await getConnectionSecrets(connection.id);
   if (!secrets?.clientSecret) throw new Error('This connection has no stored client secret.');
@@ -317,11 +312,10 @@ resolver.define('startOAuth', async ({ payload }) => {
 
   // Everything the stateless callback needs to finish the exchange. Storing it
   // server side means the callback trusts nothing in its own URL but the state.
+  // The client secret is deliberately not copied here: the callback reads it
+  // from the connection's own secret record, so it lives in one place.
   await savePendingState(state, {
     connectionId: connection.id,
-    instanceUrl: connection.instanceUrl,
-    clientId: connection.clientId,
-    clientSecret: secrets.clientSecret,
     codeVerifier: verifier,
     redirectUri
   });
@@ -344,11 +338,9 @@ resolver.define('startOAuth', async ({ payload }) => {
 resolver.define('disconnect', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const connection = await getConnection(payload.connectionId);
-  if (connection) {
-    await deleteToken(connection.id);
-    await saveConnection({ ...connection, connectedAt: undefined, username: undefined });
-  }
+  const connection = await requireConnection(payload);
+  await deleteToken(connection.id);
+  await saveConnection({ ...connection, connectedAt: undefined, username: undefined });
 
   return { success: true };
 });
@@ -364,12 +356,15 @@ resolver.define('disconnect', async ({ payload }) => {
 resolver.define('listForgejoRepositories', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const client = await createClient(payload.connectionId);
-  const page = Number(payload.page ?? 1);
+  const connection = await requireConnection(payload);
+  const client = await createClient(connection.id);
+
+  const requested = Number(payload.page ?? 1);
+  const page = Number.isInteger(requested) && requested >= 1 ? requested : 1;
 
   const { items, hasMore } = await client.listRepositories(page);
   const connected = new Set(
-    (await listRepositories(payload.connectionId)).map((repo) => String(repo.repoId))
+    (await listRepositories(connection.id)).map((repo) => String(repo.repoId))
   );
 
   return {
@@ -404,43 +399,65 @@ resolver.define('listForgejoRepositories', async ({ payload }) => {
 resolver.define('connectRepository', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const { connectionId, repoId, fullName } = payload;
+  const connection = await requireConnection(payload);
+  const connectionId = connection.id;
+  const requestedRepoId = requireRepoId(payload.repoId);
 
-  const [owner, name] = String(fullName).split('/');
-  if (!owner || !name) throw new Error(`Unrecognised repository name: ${fullName}`);
+  const [owner, name] = String(payload.fullName ?? '').split('/');
+  if (!owner || !name) throw new Error(`Unrecognised repository name: ${payload.fullName}`);
 
-  const existing = await getRepository(connectionId, repoId);
-  if (existing) throw new Error(`${fullName} is already connected.`);
+  const existing = await getRepository(connectionId, requestedRepoId);
+  if (existing) throw new Error(`${existing.fullName} is already connected.`);
 
   const client = await createClient(connectionId);
+
+  // The repository's identity is taken from Forgejo, not from the browser. The
+  // id is what Jira files development data under and what every later webhook
+  // is matched against, so it has to be the one Forgejo actually assigned to
+  // the repository the admin named.
+  const repository = await client.getRepository(owner, name);
+  const repoId = String(repository?.id ?? '');
+  if (repoId !== requestedRepoId) {
+    throw new Error(`${owner}/${name} is not the repository that was selected. Reload the list.`);
+  }
+
+  // Creating a webhook needs admin rights on the repository. Forgejo would
+  // refuse anyway, but its 403 says less than this does.
+  if (repository.permissions && repository.permissions.admin !== true) {
+    throw new Error(`The authorizing account cannot administer ${owner}/${name}.`);
+  }
+
   const secrets = await getConnectionSecrets(connectionId);
   const { webhookUrl } = await triggerUrls(connectionId);
 
-  const hook = await client.createWebhook(owner, name, {
-    url: webhookUrl,
-    secret: secrets.webhookSecret
-  });
-
-  const repository = await client.getRepository(owner, name);
+  // A hook left behind by an earlier connect - the record was removed but the
+  // Forgejo side could not be reached - would deliver every event twice if a
+  // second one were created next to it, so an existing one is adopted.
+  const hook =
+    (await client.findWebhook(owner, name, webhookUrl)) ??
+    (await client.createWebhook(owner, name, {
+      url: webhookUrl,
+      secret: secrets.webhookSecret
+    }));
 
   await saveRepository({
     connectionId,
-    repoId: String(repoId),
-    fullName,
-    owner,
-    name,
-    htmlUrl: repository?.html_url ?? payload.htmlUrl,
+    repoId,
+    fullName: repository.full_name ?? `${owner}/${name}`,
+    owner: repository.owner?.login ?? owner,
+    name: repository.name ?? name,
+    htmlUrl: repository.html_url,
     // Needed to offer a "create pull request" action on each branch: Forgejo's
     // compare URL requires an explicit base, and nothing in the branch listing or
     // the webhook payload carries it.
-    defaultBranch: repository?.default_branch,
+    defaultBranch: repository.default_branch,
     hookId: hook?.id,
     addedAt: Date.now()
   });
 
   const { jobId } = await startBackfill(connectionId, repoId);
 
-  console.log(`Connected ${fullName} and queued backfill job ${jobId}.`);
+  console.log(`Connected ${repository.full_name} and queued backfill job ${jobId}.`);
 
   return { success: true, jobId };
 });
@@ -453,7 +470,8 @@ resolver.define('connectRepository', async ({ payload }) => {
 resolver.define('disconnectRepository', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const { connectionId, repoId } = payload;
+  const { id: connectionId } = await requireConnection(payload);
+  const repoId = requireRepoId(payload.repoId);
 
   const repo = await getRepository(connectionId, repoId);
   if (!repo) return { success: true };
@@ -478,7 +496,9 @@ resolver.define('disconnectRepository', async ({ payload }) => {
  */
 resolver.define('resyncRepository', async ({ payload }) => {
   await requireJiraAdmin();
-  return startBackfill(payload.connectionId, payload.repoId);
+
+  const { id: connectionId } = await requireConnection(payload);
+  return startBackfill(connectionId, requireRepoId(payload.repoId));
 });
 
 // ---------------------------------------------------------------------------
@@ -501,7 +521,8 @@ resolver.define('resyncRepository', async ({ payload }) => {
 resolver.define('getWorkflowSnippet', async ({ payload }) => {
   await requireJiraAdmin();
 
-  const { ciStatusUrl } = await triggerUrls(payload.connectionId);
+  const connection = await requireConnection(payload);
+  const { ciStatusUrl } = await triggerUrls(connection.id);
 
   return { ciStatusUrl, workflow: workflowYaml(ciStatusUrl) };
 });

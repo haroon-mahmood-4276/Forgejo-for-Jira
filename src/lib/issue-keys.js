@@ -4,6 +4,17 @@
  */
 export const ISSUE_KEY_PATTERN = /[A-Z][A-Z0-9]+-\d+/g;
 
+/** The same shape, anchored, for validating a value that claims to be one key. */
+const WHOLE_ISSUE_KEY = /^[A-Z][A-Z0-9]+-\d+$/;
+
+/**
+ * Whether a string is exactly one issue key - used to validate keys a caller
+ * supplies explicitly, so nothing that is not an issue key is forwarded as one.
+ */
+export function isIssueKey(value) {
+    return typeof value === 'string' && WHOLE_ISSUE_KEY.test(value);
+}
+
 /**
  * Extract unique Jira issue keys from one or more strings.
  *

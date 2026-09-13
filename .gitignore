@@ -1,14 +1,19 @@
+# Dependencies and build output
 /node_modules/
 /dist/
-/.vscode/
-.idea
 
+# Forge CLI working files (tunnel bundles, local proxy tokens)
 /.forge/
-
 /.container-service-assets/
 
+# Editors and operating systems
+/.vscode/
+/.idea/
 .DS_Store
 
+# Per-developer Claude Code settings
+/.claude/settings.local.json
+
 # Workflow files drafted here for other repositories, not part of this app.
-pest-browser-tests.yml
-ssh-inline.yml
+/pest-browser-tests.yml
+/ssh-inline.yml

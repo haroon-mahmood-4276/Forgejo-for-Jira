@@ -338,6 +338,10 @@ export function mapPullRequest(pr = {}, updateSequenceId = Date.now(), reviews =
     const issueKeys = extractIssueKeys(pr.title, sourceBranch);
     if (issueKeys.length === 0) return undefined;
 
+    // Jira keys a pull request on `id` and requires `url`; a payload missing
+    // either cannot be represented and would fail the whole batch it rode in on.
+    if (pr.number === undefined || pr.number === null || !pr.html_url) return undefined;
+
     const sourceRepoUrl = pr.head?.repo?.html_url;
     const destinationRepoUrl = pr.base?.repo?.html_url;
 

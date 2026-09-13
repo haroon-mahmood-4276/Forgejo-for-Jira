@@ -31,8 +31,29 @@ const connectionTokenKey = (id) => `conn-token:${id}`;
 const repoKey = (connectionId, repoId) => `${REPO_PREFIX}${connectionId}:${repoId}`;
 const oauthStateKey = (state) => `oauth-state:${state}`;
 
-/** The project settings page stores only a pointer to a site-level connection. */
-const projectLinkKey = (projectKey) => `project-link:${projectKey}`;
+/**
+ * Read every value under a key prefix, following the cursor to completion.
+ *
+ * `kvs.query()` pages. Nothing this app lists is expected to be large - a site
+ * has a handful of connections and at most a few hundred repositories - so
+ * reading a prefix to the end is cheap, and it means no caller has to remember
+ * the cursor dance.
+ */
+async function listByPrefix(prefix) {
+    const values = [];
+    let cursor;
+
+    do {
+        let query = kvs.query().where('key', WhereConditions.beginsWith(prefix)).limit(50);
+        if (cursor) query = query.cursor(cursor);
+
+        const page = await query.getMany();
+        values.push(...page.results.map((row) => row.value));
+        cursor = page.nextCursor;
+    } while (cursor);
+
+    return values;
+}
 
 // --- Identifier and secret generation ---------------------------------------
 
@@ -80,29 +101,9 @@ export async function getConnection(id) {
     return kvs.get(connectionKey(id));
 }
 
-/**
- * List every connection in this installation.
- *
- * `kvs.query()` pages, so we follow the cursor to completion. A site is not
- * expected to have many Forgejo instances, so reading them all is cheap.
- */
+/** List every connection in this installation, oldest first. */
 export async function listConnections() {
-    const connections = [];
-    let cursor;
-
-    do {
-        let query = kvs
-            .query()
-            .where('key', WhereConditions.beginsWith(CONNECTION_PREFIX))
-            .limit(50);
-
-        if (cursor) query = query.cursor(cursor);
-
-        const page = await query.getMany();
-        connections.push(...page.results.map((row) => row.value));
-        cursor = page.nextCursor;
-    } while (cursor);
-
+    const connections = await listByPrefix(CONNECTION_PREFIX);
     return connections.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
 }
 
@@ -189,18 +190,7 @@ export async function deleteRepository(connectionId, repoId) {
  */
 export async function listRepositories(connectionId) {
     const prefix = connectionId ? `${REPO_PREFIX}${connectionId}:` : REPO_PREFIX;
-    const repos = [];
-    let cursor;
-
-    do {
-        let query = kvs.query().where('key', WhereConditions.beginsWith(prefix)).limit(50);
-        if (cursor) query = query.cursor(cursor);
-
-        const page = await query.getMany();
-        repos.push(...page.results.map((row) => row.value));
-        cursor = page.nextCursor;
-    } while (cursor);
-
+    const repos = await listByPrefix(prefix);
     return repos.sort((a, b) => String(a.fullName).localeCompare(String(b.fullName)));
 }
 
@@ -232,21 +222,4 @@ export async function consumePendingState(state) {
     if (!pending.expiresAt || pending.expiresAt < Date.now()) return undefined;
 
     return pending;
-}
-
-// --- Project links ----------------------------------------------------------
-
-/**
- * The project settings page is informational: development information is
- * site-wide and matched by issue key, so a project does not "own" a connection.
- * We still record which connection a project admin considers theirs, so the page
- * can show the right instance and the right onboarding state.
- */
-export async function saveProjectLink(projectKey, connectionId) {
-    await kvs.set(projectLinkKey(projectKey), { projectKey, connectionId, updatedAt: Date.now() });
-}
-
-export async function getProjectLink(projectKey) {
-    if (!projectKey) return undefined;
-    return kvs.get(projectLinkKey(projectKey));
 }

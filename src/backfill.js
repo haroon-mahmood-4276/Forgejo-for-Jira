@@ -62,6 +62,17 @@ export async function startBackfill(connectionId, repoId) {
     const repo = await getRepository(connectionId, repoId);
     if (!repo) throw new Error('That repository is not connected.');
 
+    // Restarting an import that is still running would leave the earlier pages
+    // still queued, and each of those would add its counts to the new progress
+    // record. An import that has stopped making progress - Forge gave up
+    // retrying, or a job was lost - is still allowed through after a quiet
+    // period, otherwise it could never be repaired from the admin page.
+    if (isImportInFlight(repo.backfill)) {
+        throw new Error(
+            `${repo.fullName} is still importing. Wait for it to finish, or try again in an hour.`
+        );
+    }
+
     // Repositories connected before the default branch was recorded have no way to
     // build a "create pull request" URL. A re-import is the natural moment to fill
     // that in, and best effort: an unreachable Forgejo costs the branch action, not
@@ -84,6 +95,7 @@ export async function startBackfill(connectionId, repoId) {
         page: 1,
         counts: { commits: 0, branches: 0, pullRequests: 0 },
         startedAt: Date.now(),
+        updatedAt: Date.now(),
         finishedAt: undefined,
         error: undefined
     };
@@ -108,6 +120,21 @@ export async function startBackfill(connectionId, repoId) {
 
         throw error;
     }
+}
+
+/** How long a running import may go without progress before it is treated as abandoned. */
+const STALE_IMPORT_MS = 60 * 60 * 1000;
+
+/** A queued or running import that has not moved for `STALE_IMPORT_MS`. */
+export function isImportStale(backfill) {
+    if (!backfill || !['queued', 'running'].includes(backfill.status)) return false;
+    const lastProgress = backfill.updatedAt ?? backfill.startedAt ?? 0;
+    return Date.now() - lastProgress >= STALE_IMPORT_MS;
+}
+
+function isImportInFlight(backfill) {
+    if (!backfill || !['queued', 'running'].includes(backfill.status)) return false;
+    return !isImportStale(backfill);
 }
 
 /**
@@ -160,6 +187,7 @@ async function processPage(payload = {}) {
                 phase: next?.phase ?? phase,
                 page: next?.page ?? page,
                 counts,
+                updatedAt: Date.now(),
                 finishedAt: next ? undefined : Date.now(),
                 error: undefined
             }
@@ -182,7 +210,12 @@ async function processPage(payload = {}) {
         // status stays on the failure and the admin can re-sync manually.
         await saveRepository({
             ...repo,
-            backfill: { ...repo.backfill, status: 'running', error: error.message }
+            backfill: {
+                ...repo.backfill,
+                status: 'running',
+                updatedAt: Date.now(),
+                error: error.message
+            }
         });
 
         return new InvocationError({

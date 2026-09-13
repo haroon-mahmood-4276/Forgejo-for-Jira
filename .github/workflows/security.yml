@@ -1,7 +1,11 @@
-# Fails the build on any known vulnerability in the dependency tree, so a
-# regression cannot reach a Marketplace submission unnoticed. Runs on every
-# push and pull request, and weekly, because an advisory can land against an
-# unchanged tree.
+# Continuous verification, as expected by the Atlassian Marketplace security
+# requirements for cloud apps.
+#
+# - `npm audit` fails the build on any known vulnerability in the dependency
+#   tree, transitive packages included. It also runs weekly, because an advisory
+#   can be published against a tree that has not changed.
+# - The test suite runs the real source against in-memory Forge stubs.
+# - CodeQL performs static analysis of the JavaScript source.
 name: Security
 
 on:
@@ -11,15 +15,20 @@ on:
   schedule:
     - cron: '0 6 * * 1'
 
+# Least privilege by default; the CodeQL job raises what it needs.
+permissions:
+  contents: read
+
 jobs:
   audit:
-    name: Dependency audit
+    name: Dependency audit and tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
       - run: npm ci
       - name: npm audit
         run: npm audit --audit-level=moderate
@@ -37,4 +46,5 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: javascript
+          queries: security-and-quality
       - uses: github/codeql-action/analyze@v3

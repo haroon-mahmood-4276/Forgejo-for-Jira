@@ -26,6 +26,9 @@ const { extractIssueKeys } = await import('../src/lib/issue-keys.js');
 const devinfo = await import('../src/lib/devinfo.js');
 const storage = await import('../src/lib/storage.js');
 const { handler: backfillHandler, startBackfill } = await import('../src/backfill.js');
+const { handleOAuthCallback } = await import('../src/oauth-callback.js');
+const { normaliseInstanceUrl } = await import('../src/lib/forgejo-oauth.js');
+const { createClient } = await import('../src/lib/forgejo-client.js');
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -41,6 +44,7 @@ const failures = [];
 async function test(name, fn) {
     harness.reset();
     await seedConnection();
+    await seedRepository();
 
     try {
         await fn();
@@ -76,6 +80,23 @@ async function seedConnection() {
         refreshToken: 'refresh-token',
         expiresAt: Date.now() + 3_600_000,
         username: 'tester'
+    });
+}
+
+/**
+ * Every test starts with one connected repository, because a delivery for a
+ * repository that was never connected is refused before it is interpreted.
+ */
+async function seedRepository() {
+    await storage.saveRepository({
+        connectionId: CONNECTION_ID,
+        repoId: '42',
+        fullName: 'acme/test-repo',
+        owner: 'acme',
+        name: 'test-repo',
+        htmlUrl: repository.html_url,
+        hookId: 1,
+        addedAt: 1
     });
 }
 
@@ -281,6 +302,33 @@ await test('rejects an unsigned delivery', async () => {
         headers: { 'X-Forgejo-Event': ['push'] }
     });
     assert.strictEqual(response.statusCode, 401);
+});
+
+await test('rejects a malformed connection identifier before touching storage', async () => {
+    const response = await handleForgejoWebhook(
+        request(pushPayload(), { connectionId: '../conn:injected' })
+    );
+
+    assert.strictEqual(response.statusCode, 400);
+});
+
+await test('rejects a correctly signed delivery for a repository that is not connected', async () => {
+    // The signing secret is shared by every repository on the instance, so a
+    // valid signature proves where a delivery came from - not that the admin
+    // chose to connect that repository.
+    const payload = pushPayload();
+    payload.repository = { ...repository, id: 999, full_name: 'acme/unconnected' };
+
+    const response = await handleForgejoWebhook(request(payload));
+
+    assert.strictEqual(response.statusCode, 404);
+    assert.strictEqual(harness.jiraRequests.length, 0);
+});
+
+await test('rejects a signed body that is not a JSON object', async () => {
+    const response = await handleForgejoWebhook(request('[1,2,3]'));
+
+    assert.strictEqual(response.statusCode, 400);
 });
 
 await test('rejects a malformed JSON body that is correctly signed', async () => {
@@ -915,6 +963,14 @@ await test('removes a repository from Jira when it is deleted in Forgejo', async
     assert.ok(harness.jiraRequests[0].path.endsWith(`/repository/${CONNECTION_ID}-42`));
 });
 
+await test('forgets the stored record when the repository is deleted in Forgejo', async () => {
+    await handleForgejoWebhook(
+        request({ action: 'deleted', repository }, { event: 'repository' })
+    );
+
+    assert.strictEqual(await storage.getRepository(CONNECTION_ID, '42'), undefined);
+});
+
 await test('ignores repository creation', async () => {
     await handleForgejoWebhook(request({ action: 'created', repository }, { event: 'repository' }));
     assert.strictEqual(harness.jiraRequests.length, 0);
@@ -973,18 +1029,6 @@ await test('maps a branch from the REST API shape', () => {
 
 group('Backfill');
 
-async function seedRepository() {
-    await storage.saveRepository({
-        connectionId: CONNECTION_ID,
-        repoId: '42',
-        fullName: 'acme/test-repo',
-        owner: 'acme',
-        name: 'test-repo',
-        htmlUrl: repository.html_url,
-        hookId: 1,
-        addedAt: 1
-    });
-}
 
 /**
  * Invoke the consumer the way Forge does.
@@ -1015,6 +1059,33 @@ await test('queues the first page when a backfill starts', async () => {
 
     const repo = await storage.getRepository(CONNECTION_ID, '42');
     assert.strictEqual(repo.backfill.status, 'queued');
+});
+
+await test('refuses to restart an import that is still running', async () => {
+    await startBackfill(CONNECTION_ID, '42');
+
+    await assert.rejects(() => startBackfill(CONNECTION_ID, '42'), /still importing/);
+    assert.strictEqual(harness.queued.length, 1);
+});
+
+await test('restarts an import that has made no progress for an hour', async () => {
+    const repo = await storage.getRepository(CONNECTION_ID, '42');
+    await storage.saveRepository({
+        ...repo,
+        backfill: {
+            status: 'running',
+            phase: 'commits',
+            page: 3,
+            counts: { commits: 0, branches: 0, pullRequests: 0 },
+            startedAt: Date.now() - 3 * 3_600_000,
+            updatedAt: Date.now() - 2 * 3_600_000
+        }
+    });
+
+    await startBackfill(CONNECTION_ID, '42');
+
+    assert.strictEqual(harness.queued.length, 1);
+    assert.strictEqual(harness.queued[0].body.phase, 'branches');
 });
 
 await test('marks the repository failed when the queue rejects the push', async () => {
@@ -1236,6 +1307,15 @@ await test('does not collide across repositories running the same workflow', asy
             repository: { ...repository, id, name }
         });
 
+    await storage.saveRepository({
+        connectionId: CONNECTION_ID,
+        repoId: '17',
+        fullName: 'acme/repo-a',
+        owner: 'acme',
+        name: 'repo-a',
+        addedAt: 1
+    });
+
     await handleForgejoWebhook(request(inRepo(17, 'repo-a'), { event: 'action_run_success' }));
     const a = JSON.parse(harness.jiraRequests[0].options.body).builds[0];
 
@@ -1436,7 +1516,8 @@ await test('reads issue keys from the branch name when none are given', async ()
             state: 'failed',
             ref: 'ABC-9-hotfix',
             commitMessage: 'fix it',
-            buildNumber: 3
+            buildNumber: 3,
+            url: 'https://forgejo.example.com/run/3'
         })
     );
 
@@ -1445,9 +1526,55 @@ await test('reads issue keys from the branch name when none are given', async ()
     assert.strictEqual(build.state, 'failed');
 });
 
+await test('forwards only well-formed explicit issue keys', async () => {
+    await handleCiStatus(
+        ciRequest({
+            type: 'build',
+            state: 'successful',
+            buildNumber: 1,
+            url: 'https://forgejo.example.com/run/1',
+            issueKeys: ['ABC-1', 'not a key', 'abc-2', ' ABC-3 ', 42]
+        })
+    );
+
+    const build = JSON.parse(harness.jiraRequests[0].options.body).builds[0];
+    assert.deepStrictEqual(build.issueKeys, ['ABC-1', 'ABC-3']);
+});
+
+await test('rejects a build report with no URL, naming the field', async () => {
+    const response = await handleCiStatus(
+        ciRequest({ type: 'build', state: 'successful', buildNumber: 1, issueKeys: ['ABC-1'] })
+    );
+
+    assert.strictEqual(response.statusCode, 400);
+    assert.match(response.body, /url/);
+    assert.strictEqual(harness.jiraRequests.length, 0);
+});
+
+await test('does not send NaN for a build number that is not numeric', async () => {
+    await handleCiStatus(
+        ciRequest({
+            type: 'build',
+            state: 'successful',
+            buildNumber: 'seven',
+            url: 'https://forgejo.example.com/run/7',
+            issueKeys: ['ABC-1']
+        })
+    );
+
+    const build = JSON.parse(harness.jiraRequests[0].options.body).builds[0];
+    assert.strictEqual(build.buildNumber, 0);
+});
+
 await test('coerces an unknown build state rather than failing the batch', async () => {
     await handleCiStatus(
-        ciRequest({ type: 'build', state: 'exploded', buildNumber: 1, issueKeys: ['ABC-1'] })
+        ciRequest({
+            type: 'build',
+            state: 'exploded',
+            buildNumber: 1,
+            url: 'https://forgejo.example.com/run/1',
+            issueKeys: ['ABC-1']
+        })
     );
 
     assert.strictEqual(JSON.parse(harness.jiraRequests[0].options.body).builds[0].state, 'unknown');
@@ -1474,7 +1601,13 @@ await test('submits a deployment', async () => {
 
 await test('maps an unrecognised environment name to unmapped', async () => {
     await handleCiStatus(
-        ciRequest({ type: 'deployment', state: 'successful', environment: 'qa-3', issueKeys: ['ABC-2'] })
+        ciRequest({
+            type: 'deployment',
+            state: 'successful',
+            environment: 'qa-3',
+            url: 'https://forgejo.example.com/run/3',
+            issueKeys: ['ABC-2']
+        })
     );
 
     const deployment = JSON.parse(harness.jiraRequests[0].options.body).deployments[0];
@@ -1498,6 +1631,7 @@ await test('does not disguise a Jira rejection as a rejection of the caller', as
             type: 'deployment',
             state: 'successful',
             environment: 'production',
+            url: 'https://forgejo.example.com/run/9',
             issueKeys: ['ABC-2']
         })
     );
@@ -1517,6 +1651,7 @@ await test('keeps a rolled back deployment as rolled_back', async () => {
             type: 'deployment',
             state: 'rolled_back',
             environment: 'production',
+            url: 'https://forgejo.example.com/run/9',
             issueKeys: ['ABC-2']
         })
     );
@@ -1653,6 +1788,180 @@ await test('consumes a pending OAuth state exactly once', async () => {
     assert.ok(await storage.consumePendingState('state-1'));
     // Replaying an intercepted callback URL must not work.
     assert.strictEqual(await storage.consumePendingState('state-1'), undefined);
+});
+
+// ---------------------------------------------------------------------------
+
+group('OAuth');
+
+function callback(query) {
+    return {
+        queryParameters: Object.fromEntries(
+            Object.entries(query).map(([key, value]) => [key, [value]])
+        ),
+        headers: {}
+    };
+}
+
+await test('rejects a callback whose state was never issued', async () => {
+    const response = await handleOAuthCallback(callback({ state: 'forged', code: 'abc' }));
+
+    assert.strictEqual(response.statusCode, 400);
+    assert.strictEqual(harness.fetches.length, 0, 'no token exchange may be attempted');
+});
+
+await test('escapes a provider error echoed back into the page', async () => {
+    const response = await handleOAuthCallback(
+        callback({ error: 'access_denied', error_description: '<script>alert(1)</script>' })
+    );
+
+    assert.strictEqual(response.statusCode, 400);
+    assert.ok(!response.body.includes('<script>'));
+    assert.ok(response.body.includes('&lt;script&gt;'));
+    assert.ok(response.headers['Content-Security-Policy'][0].includes("default-src 'none'"));
+    assert.strictEqual(response.headers['Cache-Control'][0], 'no-store');
+});
+
+await test('exchanges the code, verifies the token and stores it', async () => {
+    await storage.savePendingState('state-ok', {
+        connectionId: CONNECTION_ID,
+        codeVerifier: 'verifier',
+        redirectUri: 'https://trigger.example/x1/forgejo-oauth-callback'
+    });
+    await storage.deleteToken(CONNECTION_ID);
+
+    harness.respondWith({ access_token: 'fresh', refresh_token: 'r2', expires_in: 3600 });
+    harness.respondWith({ preferred_username: 'alice' });
+
+    const response = await handleOAuthCallback(callback({ state: 'state-ok', code: 'code-1' }));
+
+    assert.strictEqual(response.statusCode, 200);
+
+    const exchange = JSON.parse(harness.fetches[0].options.body);
+    assert.strictEqual(exchange.grant_type, 'authorization_code');
+    assert.strictEqual(exchange.code_verifier, 'verifier');
+    // The client secret comes from the connection's own secret record, not from
+    // the pending state.
+    assert.strictEqual(exchange.client_secret, 'client-secret');
+
+    const token = await storage.getToken(CONNECTION_ID);
+    assert.strictEqual(token.accessToken, 'fresh');
+    assert.strictEqual(token.username, 'alice');
+
+    const connection = await storage.getConnection(CONNECTION_ID);
+    assert.strictEqual(connection.username, 'alice');
+    assert.ok(connection.connectedAt);
+});
+
+await test('does not record a token that fails the userinfo check', async () => {
+    await storage.savePendingState('state-bad', {
+        connectionId: CONNECTION_ID,
+        codeVerifier: 'verifier',
+        redirectUri: 'https://trigger.example/x1/forgejo-oauth-callback'
+    });
+    await storage.deleteToken(CONNECTION_ID);
+
+    harness.respondWith({ access_token: 'fresh', refresh_token: 'r2', expires_in: 3600 });
+    harness.respondWith('nope', { status: 401 });
+
+    const response = await handleOAuthCallback(callback({ state: 'state-bad', code: 'code-1' }));
+
+    assert.strictEqual(response.statusCode, 500);
+    assert.strictEqual(await storage.getToken(CONNECTION_ID), undefined);
+});
+
+await test('normalises an instance URL and refuses unsafe ones', () => {
+    assert.strictEqual(
+        normaliseInstanceUrl(' https://forgejo.example.com/ '),
+        'https://forgejo.example.com'
+    );
+    assert.strictEqual(
+        normaliseInstanceUrl('https://example.com/forgejo/'),
+        'https://example.com/forgejo'
+    );
+    assert.strictEqual(normaliseInstanceUrl('http://localhost:3000'), 'http://localhost:3000');
+
+    assert.throws(() => normaliseInstanceUrl('http://forgejo.example.com'), /HTTPS/);
+    assert.throws(() => normaliseInstanceUrl('https://user:pw@forgejo.example.com'), /password/);
+    assert.throws(() => normaliseInstanceUrl('https://forgejo.example.com/?x=1'), /query/);
+    assert.throws(() => normaliseInstanceUrl('not a url'), /valid URL/);
+});
+
+// ---------------------------------------------------------------------------
+
+group('Forgejo client');
+
+await test('refreshes an expired token before the request and stores the result', async () => {
+    await storage.saveToken(CONNECTION_ID, {
+        accessToken: 'stale',
+        refreshToken: 'r1',
+        expiresAt: Date.now() - 1000,
+        username: 'tester'
+    });
+
+    harness.respondWith({ access_token: 'fresh', refresh_token: 'r2', expires_in: 3600 });
+    harness.respondWith({ id: 42 });
+
+    const client = await createClient(CONNECTION_ID);
+    await client.getRepository('acme', 'test-repo');
+
+    assert.ok(harness.fetches[0].url.endsWith('/login/oauth/access_token'));
+    assert.strictEqual(harness.fetches[1].options.headers.Authorization, 'Bearer fresh');
+    assert.strictEqual((await storage.getToken(CONNECTION_ID)).refreshToken, 'r2');
+});
+
+await test('adopts a token another invocation already refreshed instead of racing it', async () => {
+    await storage.saveToken(CONNECTION_ID, {
+        accessToken: 'stale',
+        refreshToken: 'r1',
+        expiresAt: Date.now() - 1000,
+        username: 'tester'
+    });
+
+    const client = await createClient(CONNECTION_ID);
+
+    // A sibling invocation refreshes in the meantime. Forgejo rotates refresh
+    // tokens, so spending r1 again would be refused and break the connection.
+    await storage.saveToken(CONNECTION_ID, {
+        accessToken: 'sibling',
+        refreshToken: 'r2',
+        expiresAt: Date.now() + 3_600_000,
+        username: 'tester'
+    });
+
+    harness.respondWith({ id: 42 });
+    await client.getRepository('acme', 'test-repo');
+
+    assert.strictEqual(harness.fetches.length, 1, 'no token endpoint call expected');
+    assert.strictEqual(harness.fetches[0].options.headers.Authorization, 'Bearer sibling');
+});
+
+await test('retries once with a refreshed token after a 401', async () => {
+    harness.respondWith('expired', { status: 401 });
+    harness.respondWith({ access_token: 'fresh', refresh_token: 'r2', expires_in: 3600 });
+    harness.respondWith({ id: 42 });
+
+    const client = await createClient(CONNECTION_ID);
+    const repo = await client.getRepository('acme', 'test-repo');
+
+    assert.strictEqual(repo.id, 42);
+    assert.strictEqual(harness.fetches.length, 3);
+});
+
+await test('adopts an existing webhook rather than registering a second one', async () => {
+    harness.respondWith([
+        { id: 7, config: { url: 'https://other.example/hook' } },
+        { id: 9, config: { url: 'https://trigger.example/x1/forgejo-webhook-receiver?c=' + CONNECTION_ID } }
+    ]);
+
+    const client = await createClient(CONNECTION_ID);
+    const hook = await client.findWebhook(
+        'acme',
+        'test-repo',
+        'https://trigger.example/x1/forgejo-webhook-receiver?c=' + CONNECTION_ID
+    );
+
+    assert.strictEqual(hook.id, 9);
 });
 
 // ---------------------------------------------------------------------------

@@ -68,16 +68,7 @@ export function normaliseBuildState(state) {
     return RUN_STATES.get(String(state ?? '').toLowerCase()) ?? 'unknown';
 }
 
-/**
- * Map a Forgejo `workflow_run` webhook onto a Jira build entity.
- *
- * `action` is the status the run just moved to and `run.status` is where it
- * currently sits; they agree on a finished run, and `action` is preferred because
- * it is the event being reported.
- *
- * Returns `undefined` when the run names no Jira issue, which on most
- * repositories is the majority of runs.
- */
+/** The workflow file a run belongs to, which is what Forgejo puts in `workflow_id`. */
 export function workflowFile(payload = {}) {
     return String(payload.run?.workflow_id ?? '');
 }
@@ -103,6 +94,16 @@ export function reportsBuilds(payload, ignoredWorkflows = []) {
     );
 }
 
+/**
+ * Map a Forgejo `workflow_run` webhook onto a Jira build entity.
+ *
+ * `action` is the status the run just moved to and `run.status` is where it
+ * currently sits; they agree on a finished run, and `action` is preferred because
+ * it is the event being reported.
+ *
+ * Returns `undefined` when the run names no Jira issue, which on most
+ * repositories is the majority of runs.
+ */
 export function mapWorkflowRun(payload = {}, updateSequenceId = Date.now(), connectionId = '') {
     const run = payload.run ?? {};
 
