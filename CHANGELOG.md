@@ -5,6 +5,15 @@ All notable changes to this project are recorded here. The format follows
 [Semantic Versioning](https://semver.org/). Git tags carry the app's version; Forge assigns its own
 version on every deploy, and the two are not expected to match.
 
+## [Unreleased]
+
+### Documentation
+
+- README: named the three admin tabs and the optional display name, added a "Check that it works"
+  step to setup, a section for project admins, troubleshooting, and guidance on disconnecting and
+  uninstalling (use **Remove connection** first, because the app registers no pre-uninstall step), and
+  linked setup to the developer install commands.
+
 ## [1.1.0] — 2026-09-13
 
 ### Security

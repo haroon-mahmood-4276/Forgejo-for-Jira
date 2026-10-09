@@ -22,7 +22,10 @@ your data.
 - [Requirements](#requirements)
 - [Setting up](#setting-up)
 - [How work is matched to issues](#how-work-is-matched-to-issues)
+- [For project admins](#for-project-admins)
 - [Reporting from Forgejo Actions](#reporting-from-forgejo-actions)
+- [Troubleshooting](#troubleshooting)
+- [Disconnecting and uninstalling](#disconnecting-and-uninstalling)
 - [Architecture](#architecture)
 - [Security summary](#security-summary)
 - [Scopes and egress](#scopes-and-egress)
@@ -72,8 +75,10 @@ changes an issue's workflow status. Smart Commit parsing is deliberately out of 
 ### 1. Install the app
 
 Install from the Atlassian Marketplace listing, or with a developer-console install link if you are
-running your own deployment. Then open **Settings → Apps → Forgejo for Jira**. The page has three tabs;
-each one says what it needs before it can be used, and the page resumes where you left off.
+running your own deployment. To install a build of your own with the Forge CLI, see
+[Development](#development). Then open **Settings → Apps → Forgejo for Jira**. The page has three
+tabs, **Connect to Forgejo**, **Repositories** and **Builds & deployments**. Each one says what it
+needs before it can be used, and the page resumes where you left off.
 
 ### 2. Register an OAuth application in Forgejo
 
@@ -84,7 +89,9 @@ The first tab shows the exact **redirect URI** to use. It is unique to your inst
 2. Create an OAuth2 application. Name it anything. Leave **Confidential Client** enabled.
 3. Paste the redirect URI from Jira into the **Redirect URI** field.
 4. Copy the generated **Client ID** and **Client Secret** into the Jira page together with your
-   instance URL, and save.
+   **Forgejo instance URL** (the base URL only, over HTTPS, with no trailing path). You can also give
+   the instance a **Display name**; it is optional and defaults to the hostname. Click
+   **Save and continue**. The client secret is stored encrypted and is never displayed again.
 
 > **Permissions of the authorizing account.** Forgejo has not implemented OAuth scopes. The token
 > issued in the next step carries the **full permissions of whoever approves it** and cannot be
@@ -134,6 +141,23 @@ Click **Show workflow file** on the admin page: it generates a ready-to-paste
 store as a repository secret named `JIRA_FORGEJO_SECRET`. See
 [Reporting from Forgejo Actions](#reporting-from-forgejo-actions) for the payload.
 
+### 6. Check that it works
+
+You do not have to push anything to see a first result, because imported history is matched exactly
+like live work.
+
+1. On the **Repositories** tab, wait until the repository's import status reads **Complete**.
+2. Open a Jira issue whose key already appears in a commit message, branch name or pull request title
+   in that repository. If a commit says `ABC-12 fix the redirect loop`, open `ABC-12`.
+3. Look in the **Development** section of the issue. The commit, and any branch or pull request
+   naming the key, is listed there.
+
+To check live delivery as well, create a branch named after a real issue, for example
+`ABC-12-webhook-check`, push a commit whose message starts with `ABC-12`, and reload the issue. The
+branch and the commit appear. Neither changes the issue's status.
+
+If nothing appears, see [Troubleshooting](#troubleshooting).
+
 ---
 
 ## How work is matched to issues
@@ -145,6 +169,22 @@ text and would attach data to issues nobody referenced.
 
 Anything with no issue key is dropped and never reaches Jira. Anything for a repository that is not
 connected is rejected, even when it is correctly signed.
+
+---
+
+## For project admins
+
+Connecting Forgejo is a site-wide decision made once by a Jira administrator, so a project has nothing
+to configure. **Project settings → Forgejo** is a read-only page for project administrators. It shows:
+
+- **How your work reaches this project**, written with the project's own key: how to name a branch,
+  what to put in a commit message, and where the key can go in a pull request.
+- **Connected instances**, each marked **Authorized** or **Not authorized**. Not authorized is the usual
+  reason development data stops appearing; a Jira administrator fixes it on the admin page.
+- **Repositories feeding this site**, with the state of each history import. The list is not filtered
+  to the project, because a repository that looks unrelated may still carry this project's commits.
+
+Until an instance is connected, the page says so and points to the administrator's page.
 
 ---
 
@@ -183,6 +223,45 @@ Responses:
 | `401` | The signature did not verify. |
 | `404` | The connection in `?c=` does not exist. |
 | `502` | This app accepted the report but Jira rejected it; Jira's own message is in the body. |
+
+---
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| An issue shows nothing | The key exists on this Jira site and sits in a field the app reads (commit message, branch name, pull request title, workflow run title). The repository is listed on the **Repositories** tab, because deliveries for other repositories are refused. The connection shows **Authorized**. |
+| The connection shows **Not authorized** | Authorization lapsed or was revoked. Click **Authorize with Forgejo** on the **Connect to Forgejo** tab and approve it again. |
+| History is missing, **Failed**, or stuck | Click **Re-import** on the **Repositories** tab. It is refused while an import is making progress and allowed once it has been idle for an hour. Also confirm Forgejo is reachable over HTTPS from Atlassian's cloud. |
+| A deployment also shows an unrelated build | Add the deploy workflow's file name under **Workflows not reported as builds** on the **Builds & deployments** tab. |
+| A report from a workflow is rejected | Look up the status code in the [response table](#reporting-from-forgejo-actions). |
+| Running your own build | Read the app's logs with `forge logs -e development --since 15m`. |
+
+---
+
+## Disconnecting and uninstalling
+
+There are three levels of removal, from least to most destructive.
+
+- **Remove** on a repository (**Repositories** tab) deletes the webhook on Forgejo, forgets the
+  repository and asks Jira to delete the development data it contributed.
+- **Revoke authorization** (**Connect to Forgejo** tab) is reversible. The connection and the
+  repository selection are kept, and authorizing again restores access.
+- **Remove connection** (**Connect to Forgejo** tab, after a confirmation) deletes the stored
+  credentials and access token, deletes the webhooks the app created on every connected repository, and
+  removes their commits, branches and pull requests from the Development panel. Jira issues themselves
+  are not affected. Connecting again later re-imports the history.
+
+**Before you uninstall the app, use Remove connection.** The app registers no pre-uninstall step, so
+uninstalling on its own does not run any of that cleanup. The webhooks it created stay on Forgejo,
+delivering to a URL that no longer works, and nothing asks Jira to delete the development data. After
+uninstalling you would have to delete each webhook by hand (**Settings → Webhooks** in each repository).
+Delete the OAuth application you registered under **Applications** in Forgejo as well.
+
+To uninstall, a Jira administrator opens **Settings → Apps → Manage apps → Forgejo for Jira** and
+chooses **Uninstall**. For a build of your own, run `forge uninstall -i <installation-id>`; find the id
+with `forge install list -e <environment>`. Only an administrator of that site can uninstall; anyone
+else gets `Authorization failed: Principal has insufficient permissions`.
 
 ---
 
@@ -284,6 +363,13 @@ forge install --site <your-site>.atlassian.net --product jira -e development
 ```
 
 Node 22 or newer is required locally. The Forge runtime is Node 24.
+
+After `forge install`, open **Settings → Apps → Forgejo for Jira** on that site and follow
+[Setting up](#setting-up). A development install has its own storage, redirect URI and webhook URL,
+so it is connected separately from a production install of the same app on the same site. List
+installations with `forge install list -e development`, and remove one with
+`forge uninstall -i <installation-id>` (see
+[Disconnecting and uninstalling](#disconnecting-and-uninstalling) first).
 
 ### Testing
 
