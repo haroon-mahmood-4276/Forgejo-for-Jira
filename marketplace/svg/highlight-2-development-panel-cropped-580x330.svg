@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="580" height="330" viewBox="0 0 580 330"><defs>
+  <filter id="shadow-lg" x="-15%" y="-15%" width="130%" height="140%">
+    <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#172b4d" flood-opacity="0.16"/>
+  </filter>
+  <filter id="shadow-sm" x="-10%" y="-10%" width="120%" height="130%">
+    <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#172b4d" flood-opacity="0.12"/>
+  </filter>
+  <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#f7f9fd"/>
+    <stop offset="1" stop-color="#e9eff9"/>
+  </linearGradient>
+  <linearGradient id="night" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0e1a33"/>
+    <stop offset="1" stop-color="#1a2c55"/>
+  </linearGradient>
+  <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ffffff"/>
+    <stop offset="1" stop-color="#ffe9d6"/>
+  </linearGradient>
+  <radialGradient id="glow-orange">
+    <stop offset="0" stop-color="#ff6600" stop-opacity="0.20"/>
+    <stop offset="1" stop-color="#ff6600" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="glow-blue">
+    <stop offset="0" stop-color="#0c66e4" stop-opacity="0.16"/>
+    <stop offset="1" stop-color="#0c66e4" stop-opacity="0"/>
+  </radialGradient>
+  <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse">
+    <circle cx="2" cy="2" r="1.4" fill="#c4cde0"/>
+  </pattern>
+  <marker id="arrow-muted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M1 1 L9 5 L1 9 z" fill="#5b6b86"/>
+  </marker>
+  <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M1 1 L9 5 L1 9 z" fill="#ff6600"/>
+  </marker>
+  <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M1 1 L9 5 L1 9 z" fill="#0c66e4"/>
+  </marker>
+</defs><rect x="0" y="0" width="580" height="330" fill="url(#canvas)"/><rect x="0" y="0" width="580" height="330" fill="url(#dots)" opacity="0.55"/><circle cx="58" cy="39.6" r="420" fill="url(#glow-orange)" /><circle cx="533.6" cy="313.5" r="460" fill="url(#glow-blue)" /><rect x="26" y="24" width="528" height="282" rx="16" fill="#ffffff" stroke="#dfe3ec" stroke-width="1" filter="url(#shadow-lg)"/><text x="50" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="21" font-weight="700" fill="#172b4d" text-anchor="start">Development</text><image x="446.2" y="48.150000000000006" width="23.8" height="23.8" href="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMjEyIDIxMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPgogICAgY2lyY2xlIHsKICAgICAgZmlsbDogbm9uZTsKICAgICAgc3Ryb2tlOiAjMDAwOwogICAgICBzdHJva2Utd2lkdGg6IDE1OwogICAgfQogICAgcGF0aCB7CiAgICAgIGZpbGw6IG5vbmU7CiAgICAgIHN0cm9rZTogIzAwMDsKICAgICAgc3Ryb2tlLXdpZHRoOiAyNTsKICAgIH0KICAgIC5vcmFuZ2UgewogICAgICBzdHJva2U6I2ZmNjYwMDsKICAgIH0KICAgIC5yZWQgewogICAgICBzdHJva2U6I2Q0MDAwMDsKICAgIH0KICA8L3N0eWxlPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDYsNikiPgogICAgPHBhdGggZD0iTTU4IDE2OCB2LTk4IGE1MCA1MCAwIDAgMSA1MC01MCBoMjAiIGNsYXNzPSJvcmFuZ2UiIC8+CiAgICA8cGF0aCBkPSJNNTggMTY4IHYtMzAgYTUwIDUwIDAgMCAxIDUwLTUwIGgyMCIgY2xhc3M9InJlZCIgLz4KICAgIDxjaXJjbGUgY3g9IjE0MiIgY3k9IjIwIiByPSIxOCIgY2xhc3M9Im9yYW5nZSIgLz4KICAgIDxjaXJjbGUgY3g9IjE0MiIgY3k9Ijg4IiByPSIxOCIgY2xhc3M9InJlZCIgLz4KICAgIDxjaXJjbGUgY3g9IjU4IiBjeT0iMTgwIiByPSIxOCIgY2xhc3M9InJlZCIgLz4KICA8L2c+Cjwvc3ZnPgo="/><text x="530" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="13.6" font-weight="400" fill="#5b6b86" text-anchor="end">Forgejo</text><line x1="26" y1="84" x2="554" y2="84" stroke="#dfe3ec" stroke-width="1" /><circle cx="67.6" cy="123.2" r="17.6" fill="#f3f0ff" /><g transform="translate(57.99999999999999 113.6) scale(0.8000000000000002)" fill="none" stroke="#6e5dc6" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 7.5v9M18 10.5c0 4.5-12 2.5-12 6"/></g><text x="105.2" y="120.8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="16" font-weight="600" fill="#172b4d" text-anchor="start">ABC-12-fix-redirect-loop</text><text x="105.2" y="142.4" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b86" text-anchor="start">acme/web</text><line x1="46" y1="158" x2="534" y2="158" stroke="#eef1f6" stroke-width="1" /><circle cx="67.6" cy="194.2" r="17.6" fill="#e9f2ff" /><g transform="translate(57.99999999999999 184.6) scale(0.8000000000000002)" fill="none" stroke="#0c66e4" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5.5" r="2.5"/><circle cx="6" cy="18.5" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M6 8v8M18 16V10a3 3 0 0 0-3-3h-4M13.5 3.5 10.5 7l3 3.5"/></g><text x="105.2" y="191.79999999999998" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="600" fill="#172b4d" text-anchor="start">ABC-12 Fix redirect loop</text><text x="105.2" y="213.39999999999998" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b86" text-anchor="start">#214 · acme/web · Mina Kapoor</text><rect x="484" y="183" width="46" height="19.6" rx="4" fill="#cfe1fd"/><text x="492" y="196.256" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="9.600000000000001" font-weight="700" fill="#0055cc" text-anchor="start" letter-spacing="0.3">OPEN</text><line x1="46" y1="229" x2="534" y2="229" stroke="#eef1f6" stroke-width="1" /><circle cx="67.6" cy="265.2" r="17.6" fill="#eef1f6" /><g transform="translate(57.99999999999999 255.6) scale(0.8000000000000002)" fill="none" stroke="#5b6b86" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M2 12h6M16 12h6"/></g><text x="105.2" y="262.8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="600" fill="#172b4d" text-anchor="start">ABC-12 fix the redirect loop</text><text x="105.2" y="284.4" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#5b6b86" text-anchor="start">a1c9f3e · Mina Kapoor · 2 hours ago</text></svg>

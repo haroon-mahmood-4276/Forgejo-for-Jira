@@ -1,0 +1,564 @@
+<!doctype html>
+<!--
+  Local mock-up of how the Forgejo for Jira listing's Overview tab will look on
+  the Atlassian Marketplace. Open it straight from disk, no server needed:
+
+      open marketplace/preview.html
+
+  The layout follows the live Marketplace pages (header, stats, tabs, hero,
+  alternating highlights, supporting media, two-column details). Atlassian
+  renders the real page itself, so treat spacing and fonts as close, not exact.
+
+  The copy below mirrors listing.md. If you change one, change the other.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forgejo for Jira – Marketplace preview</title>
+  <style>
+    :root {
+      --text: #292a2e;
+      --muted: #6b6e76;
+      --line: #dcdfe4;
+      --surface: #ffffff;
+      --subtle: #f7f8f9;
+      --blue: #1868db;
+      --blue-dark: #1558bc;
+      --blue-bg: #e9f2ff;
+      --green-bg: #dcfff1;
+      --green: #216e4e;
+      --neutral-bg: #dcdfe4;
+      --neutral: #44546f;
+      --page: 1152px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--surface);
+      color: var(--text);
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    }
+
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1, h2, h3, p, ul, dl, dd { margin: 0; }
+    ul { padding: 0; list-style: none; }
+
+    /* ---- Preview-only chrome ---- */
+    .preview-note {
+      background: #fff7d6;
+      border-bottom: 1px solid #f1d96b;
+      color: #5c4700;
+      font-size: 13px;
+      padding: 8px 24px;
+      text-align: center;
+    }
+
+    .topbar {
+      border-bottom: 1px solid var(--line);
+    }
+    .topbar-inner {
+      align-items: center;
+      display: flex;
+      gap: 28px;
+      height: 56px;
+      margin: 0 auto;
+      max-width: var(--page);
+      padding: 0 16px;
+    }
+    .topbar strong { font-size: 18px; }
+    .topbar nav { display: flex; gap: 22px; flex: 1; font-size: 14px; }
+    .topbar nav span { color: var(--text); }
+    .topbar .signin { font-size: 14px; font-weight: 600; }
+
+    /* ---- Page ---- */
+    .page {
+      margin: 0 auto;
+      max-width: var(--page);
+      padding: 28px 16px 80px;
+    }
+
+    .app-header {
+      align-items: flex-start;
+      display: flex;
+      gap: 20px;
+    }
+    .app-header .logo {
+      border-radius: 16px;
+      height: 80px;
+      width: 80px;
+    }
+    .app-title { flex: 1; }
+    .app-title h1 { font-size: 28px; font-weight: 600; line-height: 1.25; }
+    .app-title .by { font-size: 13px; margin-top: 2px; }
+    .app-title .by a { text-decoration: underline; }
+    .app-title .works { color: var(--muted); font-size: 13px; }
+
+    .cta { text-align: center; }
+    .cta-row { display: flex; gap: 8px; }
+    .cta .price { color: var(--muted); display: block; font-size: 12px; margin-top: 6px; }
+    .btn {
+      background: #f1f2f4;
+      border: 0;
+      border-radius: 4px;
+      color: var(--text);
+      cursor: default;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 8px 14px;
+    }
+    .btn.primary { background: var(--blue); color: #fff; }
+    .btn.primary:hover { background: var(--blue-dark); text-decoration: none; }
+
+    .stats {
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      display: grid;
+      gap: 24px;
+      grid-template-columns: 1.3fr 1fr 1.1fr 1.2fr;
+      margin-top: 28px;
+      max-width: 640px;
+      padding: 14px 16px;
+    }
+    .stats .label {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .stats .value { font-size: 14px; margin-top: 4px; }
+
+    .lozenge {
+      background: var(--neutral-bg);
+      border-radius: 3px;
+      color: var(--neutral);
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      padding: 2px 6px;
+      text-transform: uppercase;
+    }
+    .lozenge.green { background: var(--green-bg); color: var(--green); }
+
+    .view-for { font-size: 14px; margin-top: 28px; }
+    .view-for button {
+      background: none;
+      border: 0;
+      cursor: default;
+      font: inherit;
+      font-weight: 600;
+    }
+
+    .tabs {
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      gap: 28px;
+      margin-top: 16px;
+    }
+    .tabs a {
+      border-bottom: 2px solid transparent;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 10px 2px;
+    }
+    .tabs a.active { border-color: var(--blue); color: var(--blue); }
+
+    /* ---- Hero and highlights ---- */
+    .hero {
+      align-items: center;
+      display: grid;
+      gap: 48px;
+      grid-template-columns: 1fr 1fr;
+      margin-top: 28px;
+    }
+    .hero h2 { font-size: 24px; font-weight: 700; line-height: 1.3; }
+
+    .shot {
+      background: var(--subtle);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      display: block;
+      width: 100%;
+    }
+
+    .highlight {
+      align-items: center;
+      display: grid;
+      gap: 48px;
+      grid-template-columns: 1fr 1fr;
+      margin-top: 56px;
+    }
+    .highlight.reverse .shot { order: 2; }
+    .highlight h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+    .highlight p { font-size: 15px; }
+
+    .media { margin-top: 64px; }
+    .media h2, .details h2, .side h2 { font-size: 20px; font-weight: 600; }
+    .thumbs {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(4, 1fr);
+      margin-top: 16px;
+    }
+    .thumbs button {
+      aspect-ratio: 16 / 9;
+      background: var(--subtle);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: zoom-in;
+      overflow: hidden;
+      padding: 0;
+    }
+    .thumbs button:hover, .thumbs button:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 1px;
+    }
+    .thumbs img { display: block; height: 100%; object-fit: cover; width: 100%; }
+
+    /* ---- Details columns ---- */
+    .cols {
+      display: grid;
+      gap: 48px;
+      grid-template-columns: 1fr 360px;
+      margin-top: 64px;
+    }
+    .details h3 { font-size: 15px; font-weight: 700; margin: 24px 0 8px; }
+    .details ul { list-style: disc; padding-left: 22px; }
+    .details li { margin-bottom: 8px; }
+    .details .resources { margin-top: 56px; }
+    .details .resource { margin-top: 16px; }
+    .details .resource h3 { margin: 0 0 2px; }
+
+    .side .item { margin-top: 24px; }
+    .side .item h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+    .side .row { display: flex; gap: 10px; }
+    .side .row svg { flex: none; margin-top: 3px; }
+    .side .row p { color: var(--text); font-size: 14px; }
+    .side .row a { display: inline-block; font-size: 14px; font-weight: 600; margin-top: 6px; }
+    .side .version { margin-top: 44px; }
+    .side dl { margin-top: 12px; }
+    .side dt { font-size: 13px; font-weight: 700; margin-top: 18px; }
+    .side dd { font-size: 14px; margin-top: 2px; }
+    .side dd ul { list-style: disc; margin-top: 4px; padding-left: 20px; }
+    .side code { font: 12.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+    /* ---- Lightbox ---- */
+    dialog {
+      background: var(--surface);
+      border: 0;
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
+      max-width: min(1100px, 94vw);
+      padding: 0;
+    }
+    dialog::backdrop { background: rgba(9, 30, 66, .7); }
+    dialog img { display: block; width: 100%; }
+    dialog p { padding: 14px 20px 18px; }
+    dialog button {
+      background: rgba(255, 255, 255, .92);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      font: inherit;
+      padding: 4px 10px;
+      position: absolute;
+      right: 12px;
+      top: 12px;
+    }
+
+    @media (max-width: 860px) {
+      .hero, .highlight, .cols { grid-template-columns: 1fr; gap: 24px; }
+      .highlight.reverse .shot { order: 0; }
+      .thumbs { grid-template-columns: repeat(2, 1fr); }
+      .stats { grid-template-columns: 1fr 1fr; }
+      .app-header { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-note">
+    Local preview of the Marketplace Overview tab. Ratings, installs and badges are assigned by
+    Atlassian and shown here as placeholders. Click a screenshot to enlarge it.
+  </div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <strong>Marketplace</strong>
+      <nav aria-label="Marketplace navigation (mock)">
+        <span>Works with ▾</span><span>Categories ▾</span><span>Resources ▾</span>
+      </nav>
+      <span class="signin">Sign in</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <!-- App header -->
+    <section class="app-header">
+      <img class="logo" src="images/logo-144x144.png"
+           alt="Forgejo for Jira logo: the Forgejo fork mark on a light orange tile">
+      <div class="app-title">
+        <h1>Forgejo for Jira</h1>
+        <p class="by">by <a href="#">IamRoon</a></p>
+        <p class="works">works with Jira Cloud</p>
+      </div>
+      <div class="cta">
+        <div class="cta-row">
+          <a class="btn primary" href="#">Get it now</a>
+          <button class="btn" type="button" aria-label="More actions">⋯</button>
+        </div>
+        <span class="price">Free app</span>
+      </div>
+    </section>
+
+    <section class="stats" aria-label="App statistics (placeholders)">
+      <div><div class="label">Overall ratings</div><div class="value">No reviews yet</div></div>
+      <div><div class="label">Installs</div><div class="value">New listing</div></div>
+      <div><div class="label">Support</div><div class="value"><span class="lozenge">Best effort</span></div></div>
+      <div><div class="label">Trust signals</div><div class="value">None yet</div></div>
+    </section>
+
+    <p class="view-for">View for: <button type="button">Cloud ▾</button></p>
+
+    <nav class="tabs" aria-label="Listing tabs (mock)">
+      <a class="active" href="#">Overview</a>
+      <a href="#">Reviews</a>
+      <a href="#">Privacy &amp; Security</a>
+      <a href="#">Support</a>
+      <a href="#">Installation</a>
+    </nav>
+
+    <!-- Hero: tagline beside the banner -->
+    <section class="hero">
+      <h2>Show Forgejo commits, branches, pull requests, builds and deployments on the Jira issues they belong to.</h2>
+      <img class="shot" src="images/banner-1120x548.png"
+           alt="Forgejo for Jira banner: the app name and a Development panel listing a branch, a pull request and a commit, with a production deployment card">
+    </section>
+
+    <!-- Three highlights, using the 580 x 330 crops -->
+    <section class="highlight">
+      <img class="shot" src="images/highlight-1-connect-cropped-580x330.png"
+           alt="The Forgejo logo linked by a shield icon to a Jira issue showing two commits, one branch and one pull request">
+      <div>
+        <h3>Connect Forgejo once, then pick repositories</h3>
+        <p>Register one OAuth app, authorize it, and choose your repositories. The app creates and signs each webhook for you, then imports existing history so older issues fill in too.</p>
+      </div>
+    </section>
+
+    <section class="highlight reverse">
+      <img class="shot" src="images/highlight-2-development-panel-cropped-580x330.png"
+           alt="A Development panel listing a branch, an open pull request and a commit from Forgejo">
+      <div>
+        <h3>Development context on every Jira issue</h3>
+        <p>Commits, branches and pull requests appear in the Development panel of any issue whose key is in a commit message, branch name or pull request title. The same place your team already looks.</p>
+      </div>
+    </section>
+
+    <section class="highlight">
+      <img class="shot" src="images/highlight-3-builds-deployments-cropped-580x330.png"
+           alt="A passing build, a passing staging deployment, a production deployment in progress and a feature flag at 25 percent rollout">
+      <div>
+        <h3>Builds and deployments, right on the issue</h3>
+        <p>Forgejo Actions runs appear as builds automatically. Add one generated workflow file to report deployments and feature flags, then see what is running where without leaving Jira.</p>
+      </div>
+    </section>
+
+    <!-- Additional screenshots -->
+    <section class="media">
+      <h2>Supporting media</h2>
+      <div class="thumbs">
+        <button type="button" data-full="images/gallery-1-repositories-1840x900.png"
+                data-caption="Connect repositories from Forgejo and watch their history import in the background. Re-import or remove a repository at any time."
+                data-alt="The Repositories tab of the admin page, with available and connected repositories and their import status">
+          <img src="images/gallery-1-repositories-1840x900.png" alt="Repositories tab of the admin page">
+        </button>
+        <button type="button" data-full="images/gallery-2-builds-tab-1840x900.png"
+                data-caption="Builds need no setup. Exclude deploy workflows so they are not also shown as builds, and generate a ready-to-paste workflow file that reports deployments."
+                data-alt="The Builds and deployments tab with a dialog showing the generated workflow file">
+          <img src="images/gallery-2-builds-tab-1840x900.png" alt="Builds and deployments tab with the generated workflow dialog">
+        </button>
+        <button type="button" data-full="images/gallery-3-project-settings-1840x900.png"
+                data-caption="A read-only project page shows project admins how to name branches and commits, which Forgejo instance is connected, and how each repository's import is going."
+                data-alt="A Jira project settings page named Forgejo explaining how work reaches the project">
+          <img src="images/gallery-3-project-settings-1840x900.png" alt="Project settings page named Forgejo">
+        </button>
+        <button type="button" data-full="images/gallery-4-issue-key-matching-1840x900.png"
+                data-caption="Keys are read from specific fields only: commit messages, branch names, pull request titles and workflow run titles. Work with no key is dropped, and commits never change an issue's status."
+                data-alt="A commit message, branch name and pull request title containing ABC-12, leading to the ABC-12 issue">
+          <img src="images/gallery-4-issue-key-matching-1840x900.png" alt="Issue key matching from commit, branch and pull request to an issue">
+        </button>
+      </div>
+    </section>
+
+    <!-- Details and sidebar -->
+    <div class="cols">
+      <div class="details">
+        <h2>More details</h2>
+
+        <h3>Connect with ease</h3>
+        <ul>
+          <li>Link a self-hosted Forgejo instance over HTTPS with OAuth 2.0 and PKCE</li>
+          <li>Choose the repositories you administer; the app creates a signed webhook for each one</li>
+          <li>Existing commits, branches and pull requests are imported, so older issues fill in too</li>
+        </ul>
+
+        <h3>Stay in context</h3>
+        <ul>
+          <li>Commits, branches, pull requests, builds, deployments and feature flags in the Development panel</li>
+          <li>Matched by the issue key in a commit message, branch name, pull request title or workflow run title</li>
+          <li>Builds from Forgejo Actions need no setup; a generated workflow file reports deployments and feature flags</li>
+        </ul>
+
+        <h3>Stay in control</h3>
+        <ul>
+          <li>Nothing moves an issue: commits never change workflow status</li>
+          <li>A read-only project page shows project admins how to name work</li>
+          <li>No read access to Jira issue content is requested</li>
+        </ul>
+
+        <h3>Private by design</h3>
+        <ul>
+          <li>Runs on Atlassian Forge. The vendor operates no server in the data path and receives none of your data</li>
+        </ul>
+
+        <div class="resources">
+          <h2>Resources</h2>
+          <div class="resource">
+            <h3>App documentation</h3>
+            <p>Setup, usage, troubleshooting and uninstall guidance, in <a href="https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/blob/v1/README.md">the project README</a></p>
+          </div>
+          <div class="resource">
+            <h3>Reporting from Forgejo Actions</h3>
+            <p><a href="https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/blob/v1/README.md#reporting-from-forgejo-actions">How to report deployments and feature flags</a></p>
+          </div>
+          <div class="resource">
+            <h3>Source code and issues</h3>
+            <p><a href="https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/tree/v1">View the source on GitHub</a> · <a href="https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/issues">Report an issue</a></p>
+          </div>
+          <div class="resource">
+            <h3>License</h3>
+            <p><a href="https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/blob/v1/LICENSE">MIT license</a> for this app</p>
+          </div>
+        </div>
+      </div>
+
+      <aside class="side">
+        <h2>Privacy and Security</h2>
+
+        <div class="item">
+          <h3>Privacy policy</h3>
+          <div class="row">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6e76" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/></svg>
+            <div>
+              <p>The vendor's privacy policy applies to the use of this app. No data is sent to the vendor.</p>
+              <a href="https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/blob/v1/PRIVACY.md">Privacy policy ↗</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="item">
+          <h3>Security policy</h3>
+          <div class="row">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6e76" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 6v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+            <div>
+              <p>Signed deliveries, PKCE, encrypted secrets and per-resolver permission checks. Report vulnerabilities privately to security@iamroon.pk.</p>
+              <a href="https://github.com/haroon-mahmood-4276/Forgejo-for-Jira/blob/v1/SECURITY.md">Security policy ↗</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="item">
+          <h3>Integration permissions</h3>
+          <div class="row">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6e76" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            <div>
+              <p>Forgejo for Jira requests seven Jira scopes and no read access to issue content. It contacts only the Forgejo instance an administrator enters.</p>
+              <a href="#scopes">See the scopes ↓</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="version">
+          <h2>Version information</h2>
+          <dl>
+            <dt style="margin-top:0">Version</dt>
+            <dd>1.1.0 &nbsp;·&nbsp; for Jira Cloud</dd>
+
+            <dt>Release date</dt>
+            <dd>Sep 13th 2026</dd>
+
+            <dt>Summary</dt>
+            <dd>Stricter webhook checks, plus fixes for token refresh and history import races</dd>
+
+            <dt>Details</dt>
+            <dd>
+              Security:
+              <ul>
+                <li>Webhook deliveries are accepted only for repositories connected on the admin page.</li>
+                <li>Connection IDs, instance URLs and CI report issue keys are validated before use.</li>
+              </ul>
+              Fixes:
+              <ul>
+                <li>Two simultaneous token refreshes no longer break the connection.</li>
+                <li>Reconnecting a repository no longer creates a duplicate webhook.</li>
+              </ul>
+            </dd>
+
+            <dt id="scopes">Required scopes</dt>
+            <dd>
+              <ul>
+                <li><code>write:dev-info:jira</code></li>
+                <li><code>delete:dev-info:jira</code></li>
+                <li><code>write:build-info:jira</code></li>
+                <li><code>write:deployment-info:jira</code></li>
+                <li><code>write:feature-flag-info:jira</code></li>
+                <li><code>read:jira-work</code></li>
+                <li><code>storage:app</code></li>
+              </ul>
+            </dd>
+
+            <dt>Payment model</dt>
+            <dd>Free</dd>
+
+            <dt>License type</dt>
+            <dd>Open source (MIT)</dd>
+          </dl>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <!-- Enlarged screenshot with its caption -->
+  <dialog id="lightbox">
+    <button type="button" id="lightbox-close">Close</button>
+    <img id="lightbox-image" src="" alt="">
+    <p id="lightbox-caption"></p>
+  </dialog>
+
+  <script>
+    // Open a clicked thumbnail at full size, with its caption underneath.
+    const box = document.getElementById('lightbox');
+    const boxImage = document.getElementById('lightbox-image');
+    const boxCaption = document.getElementById('lightbox-caption');
+
+    document.querySelectorAll('.thumbs button').forEach((thumb) => {
+      thumb.addEventListener('click', () => {
+        boxImage.src = thumb.dataset.full;
+        boxImage.alt = thumb.dataset.alt;
+        boxCaption.textContent = thumb.dataset.caption;
+        box.showModal();
+      });
+    });
+
+    document.getElementById('lightbox-close').addEventListener('click', () => box.close());
+    // Clicking the dark backdrop (the dialog element itself) also closes it.
+    box.addEventListener('click', (event) => { if (event.target === box) box.close(); });
+  </script>
+</body>
+</html>
